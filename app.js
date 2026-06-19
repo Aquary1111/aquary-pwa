@@ -47,6 +47,23 @@
   }
   function greeting() { var h = new Date().getHours(); return h < 12 ? 'おはようございます' : h < 18 ? 'こんにちは' : 'こんばんは'; }
   function isPublicTank(t) { return t && (t.isPublic === true || t.isPublic === 'TRUE' || t.isPublic === 'true'); }
+  var PARAMS = [
+    { key: 'temp', label: '水温', unit: '°C' }, { key: 'ph', label: 'pH', unit: '' },
+    { key: 'gh', label: 'GH', unit: '' }, { key: 'kh', label: 'KH', unit: '' },
+    { key: 'no2', label: 'NO₂', unit: 'mg/L' }, { key: 'no3', label: 'NO₃', unit: 'mg/L' },
+    { key: 'tds', label: 'TDS', unit: 'ppm' }, { key: 'co2', label: 'CO₂', unit: 'mg/L' }
+  ];
+  var WQT = { temp: [22, 28], ph: [6.0, 7.5], gh: [3, 8], kh: [1, 4], no2: [0, 0.1], no3: [0, 25], tds: [50, 200], co2: [10, 30] };
+  function capKey(k) { return k.charAt(0).toUpperCase() + k.slice(1); }
+  function targetRange(t, key) {
+    var mn = Number(t['target' + capKey(key) + 'Min']); var mx = Number(t['target' + capKey(key) + 'Max']);
+    return [isNaN(mn) ? WQT[key][0] : mn, isNaN(mx) ? WQT[key][1] : mx];
+  }
+  function pColor(key, val, t) {
+    if (val === undefined || val === '' || val === null) return 'var(--dim)';
+    var v = Number(val); if (isNaN(v)) return 'var(--dim)';
+    var r = targetRange(t, key); return (v < r[0] || v > r[1]) ? 'var(--yellow,#ffcf5a)' : 'var(--good)';
+  }
 
   // ---------- API ----------
   function api(action, payload) {
@@ -337,7 +354,7 @@
       '<div style="display:flex;gap:12px;align-items:center;margin-bottom:10px">' +
       (t.photoUrl ? '<img class="thumb" style="width:56px;height:56px" src="' + esc(imgUrl(t.photoUrl)) + '">' : '<div class="thumb" style="width:56px;height:56px;display:grid;place-items:center;font-size:24px">🐠</div>') +
       '<div style="flex:1;min-width:0"><div class="ttl">' + esc(t.name || '水槽') + '</div>' +
-      '<div class="meta">' + esc(t.type || '') + (t.volume ? ' ・ ' + esc(t.volume) + 'L' : '') + '</div></div>' +
+      '<div class="meta">' + esc(t.type || '') + (t.volume ? ' ・ ' + esc(t.volume) + (/[0-9]$/.test(String(t.volume)) ? 'L' : '') : '') + '</div></div>' +
       '<span class="pill" style="color:' + sc + '">' + esc(t.status || '良好') + '</span></div>' +
       '<div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:10px">' +
       params.map(function (p) { return '<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:6px;text-align:center"><div class="muted" style="font-size:10px">' + p[0] + '</div><div style="font-weight:700;font-size:14px">' + (p[1] !== undefined && p[1] !== '' ? esc(p[1]) : '--') + '</div></div>'; }).join('') +
@@ -347,7 +364,9 @@
       [['換水', 'water'], ['給餌', 'feeding'], ['水質', 'wq'], ['掃除', 'maint']].map(function (a) {
         return '<button class="btn sec" style="font-size:11px;padding:8px 4px" data-act="' + a[1] + '" data-tid="' + esc(t.id) + '" data-tn="' + esc(t.name || '') + '">' + esc(a[0]) + '</button>';
       }).join('') +
-      '</div></div>';
+      '</div>' +
+      '<button class="btn sec full" style="margin-top:8px;font-size:12px" data-open="' + esc(t.id) + '">詳細を見る ›</button>' +
+      '</div>';
   }
   function viewTanks() {
     app.innerHTML = offlineBanner() +
@@ -360,6 +379,133 @@
         if (!confirm('「' + tn + '」の' + QLABEL[kind] + 'を記録しますか？')) return;
         recordAction(tid, tn, QTYPE[kind]);
       });
+    });
+    [].forEach.call(app.querySelectorAll('[data-open]'), function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-open'); var t = (state.tanks || []).filter(function (x) { return x.id === id; })[0];
+        if (t) openDetail(t);
+      });
+    });
+  }
+
+  // ================= 水槽の詳細 =================
+  function openDetail(t) { state.selTank = t; state.tankTab = state.tankTab || 'wq'; loadDetail(t.id); viewTankDetail(); }
+  function loadDetail(id) {
+    state.dd = { wq: null, orgs: null, plants: null, records: null };
+    function done(tab) { if (state.selTank && state.selTank.id === id && state.tankTab === tab) paintDetailBody(); }
+    api('getWaterQuality', { tankId: id }).then(function (d) { state.dd.wq = d || []; done('wq'); }).catch(function () { state.dd.wq = []; done('wq'); });
+    api('getOrganisms', { tankId: id }).then(function (d) { state.dd.orgs = d || []; done('orgs'); }).catch(function () { state.dd.orgs = []; done('orgs'); });
+    api('getPlants', { tankId: id }).then(function (d) { state.dd.plants = d || []; done('plants'); }).catch(function () { state.dd.plants = []; done('plants'); });
+    api('getRecords', { tankId: id }).then(function (d) { state.dd.records = d || []; done('records'); }).catch(function () { state.dd.records = []; done('records'); });
+    if (state.feeding[id] === undefined) {
+      api('getFeedingSchedules', { tankIds: [id] }).then(function (m) { state.feeding[id] = (m && m[id]) || []; done('feeding'); }).catch(function () { state.feeding[id] = []; done('feeding'); });
+    }
+  }
+  var DETAIL_TABS = [['wq', '水質'], ['orgs', '生体'], ['plants', '水草'], ['feeding', '給餌'], ['records', '記録']];
+  function viewTankDetail() {
+    var t = state.selTank; if (!t) { setTab('tanks'); return; }
+    var emoji = t.type === '海水' ? '🐡' : t.type === 'ビオトープ' ? '🌾' : '🌿';
+    var paramGrid = '<div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin:10px 0">' +
+      PARAMS.map(function (p) {
+        var val = t[p.key]; var col = pColor(p.key, val, t);
+        var has = val !== undefined && val !== '' && val !== null;
+        return '<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:7px;text-align:center">' +
+          '<div class="muted" style="font-size:10px">' + p.label + '</div>' +
+          '<div style="font-weight:700;font-size:14px">' + (has ? esc(val) : '--') + '<span class="muted" style="font-size:9px">' + p.unit + '</span></div>' +
+          '<div style="font-size:9px;color:' + col + '">' + (has ? (col === 'var(--good)' ? '基準内' : '基準外') : '未測定') + '</div></div>';
+      }).join('') + '</div>';
+    app.innerHTML = offlineBanner() +
+      '<div style="display:flex;align-items:center;gap:10px;padding:4px 2px 8px">' +
+      '<button class="btn sec" style="padding:6px 10px" id="det-back">←</button>' +
+      '<h2 style="margin:0;font-size:18px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(t.name || '水槽') + '</h2></div>' +
+      (t.photoUrl ? '<img src="' + esc(imgUrl(t.photoUrl)) + '" style="width:100%;max-height:220px;object-fit:cover;border-radius:14px;background:#0A2D3F">' : '<div style="height:140px;border-radius:14px;background:var(--card2);display:grid;place-items:center;font-size:60px">' + emoji + '</div>') +
+      '<div class="card" style="margin-top:10px"><div style="display:flex;justify-content:space-around;text-align:center">' +
+      [['設置日', t.setupDate || '未設定'], ['水量', (t.volume || '--')], ['タイプ', t.type || '--']].map(function (r) {
+        return '<div><div class="muted" style="font-size:11px">' + r[0] + '</div><div style="font-weight:700;font-size:14px">' + esc(r[1]) + '</div></div>';
+      }).join('') + '</div>' + paramGrid + '</div>' +
+      '<div class="card" style="padding:6px"><div style="display:flex;gap:4px;overflow:auto" id="det-tabs">' +
+      DETAIL_TABS.map(function (d) { return '<button class="btn sec" style="flex:1;font-size:12px;padding:8px 4px' + (state.tankTab === d[0] ? ';background:var(--accent);color:#00151d' : '') + '" data-dt="' + d[0] + '">' + d[1] + '</button>'; }).join('') +
+      '</div></div>' +
+      '<div id="det-body"></div>';
+    document.getElementById('det-back').addEventListener('click', function () { state.selTank = null; setTab('tanks'); });
+    [].forEach.call(app.querySelectorAll('[data-dt]'), function (b) {
+      b.addEventListener('click', function () { state.tankTab = b.getAttribute('data-dt'); viewTankDetail(); });
+    });
+    paintDetailBody();
+  }
+  function detLoading() { return '<div class="card"><div style="display:flex;justify-content:center;padding:14px"><div class="spin"></div></div></div>'; }
+  function statusPill(s) { var c = s === '危険' || s === '死亡' ? 'var(--red)' : s === '注意' || s === '治療中' ? 'var(--yellow,#ffcf5a)' : 'var(--good)'; return '<span class="pill" style="color:' + c + '">' + esc(s || '良好') + '</span>'; }
+  function paintDetailBody() {
+    var body = document.getElementById('det-body'); if (!body) return;
+    var t = state.selTank; var tab = state.tankTab; var dd = state.dd || {};
+    if (tab === 'wq') {
+      var list = dd.wq;
+      body.innerHTML = '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b>水質の記録</b><button class="btn" style="padding:7px 12px;font-size:12px" id="wq-add">＋ 測定</button></div>' +
+        (list === null ? '<div style="display:flex;justify-content:center;padding:10px"><div class="spin"></div></div>' :
+          (list.length ? list.slice(0, 30).map(function (w) {
+            var vals = PARAMS.filter(function (p) { return w[p.key] !== undefined && w[p.key] !== ''; }).map(function (p) { return p.label + ' ' + esc(w[p.key]); }).join(' / ');
+            return '<div class="row"><div style="flex:1;min-width:0"><div class="ttl" style="font-size:12px">' + esc(fmtDate(w.measuredAt)) + '</div><div class="meta">' + (vals || 'データなし') + (w.note ? '<br>' + esc(w.note) : '') + '</div></div></div>';
+          }).join('') : '<div class="muted">まだ測定記録がありません。</div>')) + '</div>';
+      var add = document.getElementById('wq-add'); if (add) add.addEventListener('click', function () { wqForm(t); });
+    } else if (tab === 'orgs' || tab === 'plants') {
+      var arr = tab === 'orgs' ? dd.orgs : dd.plants;
+      var label = tab === 'orgs' ? '生体' : '水草';
+      body.innerHTML = '<div class="card"><b>' + label + '</b>' +
+        (arr === null ? '<div style="display:flex;justify-content:center;padding:10px"><div class="spin"></div></div>' :
+          (arr.length ? arr.map(function (o) {
+            return '<div class="row"><div style="flex:1;min-width:0"><div class="ttl" style="font-size:13px">' + esc(o.name || '') + (tab === 'orgs' && o.count ? ' ×' + esc(o.count) : '') + '</div>' +
+              '<div class="meta">' + esc(o.scientific || '') + (tab === 'plants' && o.placement ? ' ・ ' + esc(o.placement) : '') + '</div></div>' + statusPill(o.status) + '</div>';
+          }).join('') : '<div class="muted">登録されていません。</div>')) + '</div>';
+    } else if (tab === 'feeding') {
+      var fs = state.feeding[t.id];
+      body.innerHTML = '<div class="card"><b>給餌スケジュール</b>' +
+        (fs === undefined ? '<div style="display:flex;justify-content:center;padding:10px"><div class="spin"></div></div>' :
+          (fs.length ? fs.map(function (f) {
+            return '<div class="row"><div style="flex:1;min-width:0"><div class="ttl" style="font-size:13px">' + esc(f.foodName || '給餌') + '</div>' +
+              '<div class="meta">' + esc(f.amount || '') + (f.intervalDays ? ' ・ ' + esc(f.intervalDays) + '日ごと' : '') + (f.nextFeedAt ? ' ・ 次回 ' + esc(fmtDate(f.nextFeedAt)) : '') + '</div></div>' +
+              '<button class="btn" style="padding:7px 12px;font-size:12px" data-feed="' + esc(f.id) + '">給餌</button></div>';
+          }).join('') : '<div class="muted">給餌スケジュールがありません。</div>')) + '</div>';
+      [].forEach.call(body.querySelectorAll('[data-feed]'), function (b) {
+        b.addEventListener('click', function () {
+          b.disabled = true; b.textContent = '...';
+          api('recordFeeding', { id: b.getAttribute('data-feed') }).then(function () {
+            toast('給餌を記録しました');
+            api('getFeedingSchedules', { tankIds: [t.id] }).then(function (m) { state.feeding[t.id] = (m && m[t.id]) || []; paintDetailBody(); }).catch(function () { b.disabled = false; b.textContent = '給餌'; });
+          }).catch(function (e) { b.disabled = false; b.textContent = '給餌'; toast(e.message, 'err'); });
+        });
+      });
+    } else if (tab === 'records') {
+      var rs = dd.records;
+      body.innerHTML = '<div class="card"><b>記録</b>' +
+        (rs === null ? '<div style="display:flex;justify-content:center;padding:10px"><div class="spin"></div></div>' :
+          (rs.length ? rs.slice(0, 40).map(function (r) {
+            return '<div class="row"><div style="font-size:18px">' + esc(r.icon || '📝') + '</div><div style="flex:1;min-width:0"><div class="ttl" style="font-size:13px">' + esc(r.type || '') + '</div>' + (r.note ? '<div class="meta">' + esc(r.note) + '</div>' : '') + '</div><div class="meta">' + esc(fmtDate(r.createdAt)) + '</div></div>';
+          }).join('') : '<div class="muted">記録がありません。</div>')) + '</div>';
+    }
+  }
+  function wqForm(t) {
+    modal('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><b>水質を記録</b><button class="btn sec" style="padding:6px 10px" onclick="aqCloseModal()">✕</button></div>' +
+      '<div class="grid" style="grid-template-columns:1fr 1fr;gap:8px">' +
+      PARAMS.map(function (p) {
+        return '<div><label class="muted" style="font-size:12px">' + p.label + (p.unit ? '(' + p.unit + ')' : '') + '</label>' +
+          '<input id="wq-' + p.key + '" type="number" step="any" inputmode="decimal" style="width:100%;margin-top:3px;padding:9px;background:var(--card2);border:1px solid var(--border);border-radius:9px;color:var(--text)"></div>';
+      }).join('') + '</div>' +
+      '<label class="muted" style="font-size:12px;display:block;margin-top:10px">メモ</label>' +
+      '<input id="wq-note" style="width:100%;margin-top:3px;padding:9px;background:var(--card2);border:1px solid var(--border);border-radius:9px;color:var(--text)">' +
+      '<button class="btn full" style="margin-top:14px" id="wq-save">記録する</button>');
+    document.getElementById('wq-save').addEventListener('click', function () {
+      var payload = { tankId: t.id }; var any = false;
+      PARAMS.forEach(function (p) { var v = (document.getElementById('wq-' + p.key).value || '').trim(); if (v !== '') { payload[p.key] = v; any = true; } });
+      var note = (document.getElementById('wq-note').value || '').trim(); if (note) payload.note = note;
+      if (!any && !note) { toast('1つ以上入力してください', 'err'); return; }
+      this.disabled = true; this.textContent = '記録中...';
+      api('addWaterQuality', payload).then(function (res) {
+        closeModal(); toast('水質を記録しました');
+        // 水槽の最新値/ステータスを反映
+        if (res && state.selTank) { PARAMS.forEach(function (p) { if (payload[p.key] !== undefined) state.selTank[p.key] = payload[p.key]; }); if (res.status) state.selTank.status = res.status; }
+        api('getWaterQuality', { tankId: t.id }).then(function (d) { state.dd.wq = d || []; viewTankDetail(); }).catch(function () { viewTankDetail(); });
+        api('getTanks').then(function (tk) { state.tanks = tk || []; lsSet('tanks', state.tanks); }).catch(function () {});
+      }).catch(function (e) { toast(e.message, 'err'); var btn = document.getElementById('wq-save'); if (btn) { btn.disabled = false; btn.textContent = '記録する'; } });
     });
   }
 
