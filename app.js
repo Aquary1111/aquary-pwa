@@ -225,6 +225,7 @@
       state.foods = b.foods || []; lsSet('foods', state.foods);
       state.feeding = b.feeding || {};
       paintWho();
+      if (state.me && state.me.needsTermsConsent && !state.me.isAdmin) { termsGate(); return; }
       setTab(state.tab || 'home');
       // クイック操作の「前回」表示用に記録を遅延取得
       api('getRecords', {}).then(function (r) { state.records = r || []; if (state.tab === 'home') viewHome(); }).catch(function () {});
@@ -249,6 +250,18 @@
   }
   function loadingHtml() { return '<div class="center"><div class="spin"></div></div>'; }
   function offlineBanner() { return state.online ? '' : '<div class="offline">📴 オフライン表示中（最後に取得した内容です）</div>'; }
+  function termsGate() {
+    nav.style.display = 'none';
+    app.innerHTML = '<div class="center"><div style="max-width:420px">' +
+      '<div style="font-size:40px">📜</div><h2 style="margin:6px 0">利用規約・プライバシー</h2>' +
+      '<div class="muted" style="line-height:1.8;margin:12px 0">Aquaryを使うには、利用規約とプライバシーポリシーへの同意が必要です。水槽データ・画像はあなたのGoogleアカウントに紐づけて保存されます。</div>' +
+      '<button class="btn full" id="terms-ok">同意して始める</button></div></div>';
+    document.getElementById('terms-ok').addEventListener('click', function () {
+      this.disabled = true; this.textContent = '処理中...';
+      api('acceptTerms').then(function (me) { state.me = me || state.me; lsSet('me', state.me); nav.style.display = 'flex'; boot(); })
+        .catch(function (e) { toast(e.message, 'err'); var b = document.getElementById('terms-ok'); if (b) { b.disabled = false; b.textContent = '同意して始める'; } });
+    });
+  }
 
   // ---------- タブ制御 ----------
   function setTab(tab) {
@@ -813,6 +826,9 @@
   function encPhotoOp(action, e, index) {
     api(action, { encId: e.id, index: index }).then(function () { toast('更新しました'); reopenEnc(e.id); }).catch(function (er) { toast(er.message, 'err'); });
   }
+  function encReorder(e, index, direction) {
+    api('reorderEncyclopediaPhoto', { encId: e.id, index: index, direction: direction }).then(function () { reopenEnc(e.id); }).catch(function (er) { toast(er.message, 'err'); });
+  }
   function reopenEnc(id) {
     api('getEncyclopedia', encParams()).then(function (d) {
       state.enc = d || []; lsSet('enc', state.enc); paintEncGrid(state.enc);
@@ -847,6 +863,7 @@
       inputRow('fd-brand', 'メーカー', f.brand) + inputRow('fd-type', 'タイプ', f.type) +
       selectRow('fd-stock', '在庫', ['', 'full', 'half', 'low'], f.stockLevel || '') +
       inputRow('fd-img', '画像URL（任意）', f.imageUrl) +
+      ((state.me && state.me.isAdmin) ? (inputRow('fd-amz', 'Amazon商品URL', f.amazonUrl) + inputRow('fd-tag', 'アフィリエイトタグ', f.affiliateTag) + inputRow('fd-rank', '固定表示順（空=なし）', f.recommendRank, 'number') + '<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="fd-hidden"' + (f.hidden ? ' checked' : '') + '> 通常画面に出さない（非表示）</label>') : '') +
       textareaRow('fd-note', 'メモ', f.note) +
       (edit && f.canEdit ? '<button class="btn sec full" id="fd-img-up" style="margin-bottom:8px">📷 画像をアップロード</button>' : '') +
       '<button class="btn full" id="fd-save">' + (edit ? '保存する' : '追加する') + '</button>' +
@@ -866,6 +883,7 @@
       var name = val('fd-name'); if (!name) { toast('用品名を入力してください', 'err'); return; }
       var p = { name: name, category: val('fd-cat'), brand: val('fd-brand'), type: val('fd-type'), stockLevel: val('fd-stock'), imageUrl: val('fd-img'), note: val('fd-note') };
       if (edit) p.id = f.id;
+      if (state.me && state.me.isAdmin) { p.amazonUrl = val('fd-amz'); p.affiliateTag = val('fd-tag'); p.recommendRank = val('fd-rank'); p.hidden = document.getElementById('fd-hidden').checked; }
       this.disabled = true; this.textContent = '保存中...';
       api(edit ? 'updateFood' : 'addFood', p).then(function () {
         closeModal(); toast(edit ? '保存しました' : '追加しました');
@@ -880,7 +898,7 @@
   }
 
   // ---------- 管理者メンテナンス ----------
-  var ADMIN_TABS = [['dash', 'ダッシュボード'], ['reports', '通報'], ['requests', '要望'], ['users', '制限ユーザー'], ['clicks', 'クリック']];
+  var ADMIN_TABS = [['dash', 'ダッシュボード'], ['reports', '通報'], ['requests', '要望'], ['users', '制限ユーザー'], ['clicks', 'クリック'], ['settings', '設定']];
   var REPORT_ST = ['未対応', '確認中', '対応済み', '見送り'];
   var REQUEST_ST = ['未対応', '検討中', '対応済み', '見送り'];
   function adminView() {
@@ -903,6 +921,27 @@
     else if (tab === 'requests') api('getFeatureRequests').then(adminRequests).catch(adminErr);
     else if (tab === 'users') api('getModerationUsers').then(adminUsers).catch(adminErr);
     else if (tab === 'clicks') api('getAffiliateClickSummary').then(adminClicks).catch(adminErr);
+    else if (tab === 'settings') api('getAdminSettings').then(adminSettings).catch(adminErr);
+  }
+  function adminSettings(d) {
+    d = d || {}; var b = adminBody(); if (!b) return;
+    b.innerHTML = '<div class="card">' +
+      inputRow('as-tag', 'デフォルトAmazonタグ', d.defaultAffiliateTag) +
+      inputRow('as-featured', '固定おすすめ用品ID（カンマ区切り）', d.featuredProductIds) +
+      textareaRow('as-home', 'ホーム広告メモ', d.homeAdNote) +
+      textareaRow('as-detail', '詳細広告メモ', d.detailAdNote) +
+      textareaRow('as-ng', 'NGワード（カンマ区切り）', d.ngWords) +
+      '<button class="btn full" id="as-save">保存する</button>' +
+      '<div class="muted" style="font-size:11px;margin-top:8px">※ Googleログイン設定（クライアントID/シークレット）は安全のため本体アプリの管理画面で変更してください。</div></div>';
+    document.getElementById('as-save').addEventListener('click', function () {
+      this.disabled = true; this.textContent = '保存中...';
+      // googleClientId と未編集項目はそのまま往復させ、設定の消失を防ぐ（secretは触らない）
+      api('saveAdminSettings', {
+        defaultAffiliateTag: val('as-tag'), featuredProductIds: val('as-featured'),
+        homeAdNote: val('as-home'), detailAdNote: val('as-detail'), ngWords: val('as-ng'),
+        googleClientId: d.googleClientId || '', clearGoogleClientSecret: false,
+      }).then(function () { toast('保存しました'); }).catch(function (e) { toast(e.message, 'err'); }).then(function () { var x = document.getElementById('as-save'); if (x) { x.disabled = false; x.textContent = '保存する'; } });
+    });
   }
   function adminErr(e) { var b = adminBody(); if (b) b.innerHTML = '<div class="card"><div class="muted">読み込み失敗：' + esc(e.message) + '</div></div>'; }
   function adminDash(d) {
@@ -1116,6 +1155,8 @@
       (photos.length ? '<div style="display:flex;gap:8px;overflow:auto;margin-bottom:10px">' + photos.map(function (u, i) {
         return '<div style="flex-shrink:0;text-align:center"><img src="' + esc(imgUrl(u)) + '" style="height:130px;border-radius:10px;display:block">' +
           '<div style="display:flex;gap:4px;margin-top:4px;justify-content:center">' +
+          (i > 0 ? '<button class="btn sec" style="padding:3px 6px;font-size:10px" data-pleft="' + i + '">◀</button>' : '') +
+          (i < photos.length - 1 ? '<button class="btn sec" style="padding:3px 6px;font-size:10px" data-pright="' + i + '">▶</button>' : '') +
           (i > 0 ? '<button class="btn sec" style="padding:3px 7px;font-size:10px" data-pmain="' + i + '">メイン</button>' : '<span class="pill" style="font-size:10px">メイン</span>') +
           '<button class="btn sec" style="padding:3px 7px;font-size:10px" data-pdel="' + i + '">削除</button></div></div>';
       }).join('') + '</div>' : '') +
@@ -1131,6 +1172,8 @@
     document.getElementById('enc-photo').addEventListener('click', function () { encPhotoAdd(e); });
     [].forEach.call(document.querySelectorAll('[data-pmain]'), function (b) { b.addEventListener('click', function () { encPhotoOp('setEncyclopediaMainPhoto', e, Number(b.getAttribute('data-pmain'))); }); });
     [].forEach.call(document.querySelectorAll('[data-pdel]'), function (b) { b.addEventListener('click', function () { if (!confirm('この写真を削除しますか？')) return; encPhotoOp('deleteEncyclopediaPhoto', e, Number(b.getAttribute('data-pdel'))); }); });
+    [].forEach.call(document.querySelectorAll('[data-pleft]'), function (b) { b.addEventListener('click', function () { encReorder(e, Number(b.getAttribute('data-pleft')), -1); }); });
+    [].forEach.call(document.querySelectorAll('[data-pright]'), function (b) { b.addEventListener('click', function () { encReorder(e, Number(b.getAttribute('data-pright')), 1); }); });
     document.getElementById('enc-like').addEventListener('click', function () {
       var b = this; b.disabled = true;
       api('likeEncyclopedia', { id: e.id }).then(function (r) {
@@ -1161,7 +1204,13 @@
       inputRow('ef-diff', '難易度(1-5)', e.difficulty, 'number') + inputRow('ef-dist', '分布', e.distribution) +
       inputRow('ef-temp', '水温', e.temp) + inputRow('ef-ph', 'pH', e.ph) + inputRow('ef-size', 'サイズ', e.size || e.maxLength) +
       textareaRow('ef-care', '飼育方法', e.care) + textareaRow('ef-breeding', '繁殖・産卵', e.breeding) + textareaRow('ef-desc', 'メモ', e.desc) +
-      '<button class="btn full" style="margin-top:6px" id="ef-save">' + (edit ? '保存する' : '追加する') + '</button>');
+      '<button class="btn full" style="margin-top:6px" id="ef-save">' + (edit ? '保存する' : '追加する') + '</button>' +
+      (edit ? '<button class="btn sec full" id="ef-del" style="margin-top:8px;color:var(--red)">この図鑑を削除</button>' : ''));
+    var efdel = document.getElementById('ef-del');
+    if (efdel) efdel.addEventListener('click', function () {
+      if (!confirm('「' + (e.name || '') + '」を削除しますか？（登録者または管理者のみ）')) return;
+      api('deleteEncyclopedia', { id: e.id }).then(function () { closeModal(); toast('削除しました'); loadEnc(); }).catch(function (er) { toast(er.message, 'err'); });
+    });
     document.getElementById('ef-save').addEventListener('click', function () {
       var name = val('ef-name'); if (!name) { toast('名前を入力してください', 'err'); return; }
       var p = { name: name, scientific: val('ef-sci'), category: val('ef-cat'), difficulty: val('ef-diff'), distribution: val('ef-dist'), temp: val('ef-temp'), ph: val('ef-ph'), size: val('ef-size'), care: val('ef-care'), breeding: val('ef-breeding'), desc: val('ef-desc') };
@@ -1203,20 +1252,76 @@
   // ================= アカウント =================
   function viewAccount() {
     var me = state.me || {};
-    app.innerHTML = offlineBanner() + '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h2 style="margin:0;font-size:18px">アカウント</h2><button class="btn sec" style="padding:6px 10px" onclick="aqCloseModal()" id="acc-back">ホームへ</button></div>' +
-      '<div class="row"><div style="flex:1"><div class="ttl">' + esc(me.displayName || 'ユーザー') + '</div><div class="meta">' + esc(me.accountLabel || '') + (me.isAdmin ? ' ・ 管理者' : '') + '</div></div></div></div>' +
+    app.innerHTML = offlineBanner() + '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h2 style="margin:0;font-size:18px">アカウント</h2><button class="btn sec" style="padding:6px 10px" id="acc-back">ホームへ</button></div>' +
+      '<div class="row">' + (me.avatarUrl ? '<img class="thumb" style="width:48px;height:48px;border-radius:50%" src="' + esc(imgUrl(me.avatarUrl)) + '">' : '<div class="thumb" style="width:48px;height:48px;border-radius:50%;display:grid;place-items:center">🐟</div>') +
+      '<div style="flex:1"><div class="ttl">' + esc(me.displayName || 'ユーザー') + '</div><div class="meta">' + esc(me.accountLabel || '') + (me.isAdmin ? ' ・ 管理者' : '') + '</div></div>' +
+      '<button class="btn sec" style="padding:6px 10px;font-size:12px" id="acc-profile">編集</button></div></div>' +
       '<button class="btn sec full" id="acc-cal" style="margin-bottom:8px">📅 Googleカレンダー連携' + (me.calendarConnected ? '（連携済み）' : '') + '</button>' +
       '<button class="btn sec full" id="acc-foods" style="margin-bottom:8px">🧰 用品を管理</button>' +
       '<button class="btn sec full" id="acc-feedback" style="margin-bottom:8px">✉️ 問い合わせ・要望を送る</button>' +
       (me.isAdmin ? '<button class="btn sec full" id="acc-admin" style="margin-bottom:8px">🛠 管理者メンテナンス</button>' : '') +
-      '<button class="btn sec full" id="signout">ログアウト</button>' +
+      '<button class="btn sec full" id="signout" style="margin-bottom:16px">ログアウト</button>' +
+      '<div class="muted" style="font-size:12px;margin-bottom:6px">データとアカウント</div>' +
+      '<button class="btn sec full" id="acc-export" style="margin-bottom:8px">⬇️ 自分のデータをエクスポート</button>' +
+      (me.isAdmin ? '' : '<button class="btn sec full" id="acc-delete" style="color:var(--red)">アカウントを削除</button>') +
       '<div class="muted" style="text-align:center;margin-top:18px">Aquary PWA</div>';
     document.getElementById('acc-back').addEventListener('click', function () { setTab('home'); });
+    document.getElementById('acc-profile').addEventListener('click', function () { profileForm(); });
     document.getElementById('acc-cal').addEventListener('click', function () { calendarConnect(); });
     document.getElementById('acc-foods').addEventListener('click', function () { foodsView(); });
     document.getElementById('acc-feedback').addEventListener('click', function () { feedbackForm(); });
     var adm = document.getElementById('acc-admin'); if (adm) adm.addEventListener('click', function () { adminView(); });
     document.getElementById('signout').addEventListener('click', function () { signOut(false); });
+    document.getElementById('acc-export').addEventListener('click', exportData);
+    var del = document.getElementById('acc-delete'); if (del) del.addEventListener('click', deleteAccount);
+  }
+  function profileForm() {
+    var me = state.me || {};
+    modal('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><b>プロフィールを編集</b><button class="btn sec" style="padding:6px 10px" onclick="aqCloseModal()">✕</button></div>' +
+      inputRow('pf-name', 'ニックネーム', me.displayName) +
+      '<button class="btn sec full" id="pf-avatar" style="margin-bottom:10px">📷 アイコン画像を変更</button><div id="pf-prev"></div>' +
+      '<button class="btn full" id="pf-save">保存する</button>');
+    document.getElementById('pf-avatar').addEventListener('click', function () {
+      pickImage().then(function (img) {
+        if (!img) return;
+        toast('アイコンをアップロード中...');
+        api('uploadUserAvatar', { base64: img.base64, mimeType: img.mimeType, fileName: img.fileName }).then(function (r) {
+          if (state.me && r && r.url) { state.me.avatarUrl = r.url; lsSet('me', state.me); paintWho(); }
+          var pv = document.getElementById('pf-prev'); if (pv) pv.innerHTML = '<div class="muted" style="margin-bottom:10px">✓ アイコンを更新しました</div>';
+        }).catch(function (e) { toast(e.message, 'err'); });
+      });
+    });
+    document.getElementById('pf-save').addEventListener('click', function () {
+      var name = val('pf-name'); if (!name) { toast('ニックネームを入力してください', 'err'); return; }
+      this.disabled = true; this.textContent = '保存中...';
+      api('updateProfile', { displayName: name }).then(function () {
+        if (state.me) { state.me.displayName = name; lsSet('me', state.me); }
+        closeModal(); toast('保存しました'); paintWho(); viewAccount();
+      }).catch(function (e) { toast(e.message, 'err'); var b = document.getElementById('pf-save'); if (b) { b.disabled = false; b.textContent = '保存する'; } });
+    });
+  }
+  function exportData() {
+    toast('エクスポートを準備中...');
+    api('exportMyData').then(function (d) {
+      try {
+        var blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a'); a.href = url; a.download = 'aquary-export-' + (new Date().toISOString().slice(0, 10)) + '.json';
+        document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+        toast('エクスポートしました');
+      } catch (e) { toast('ダウンロードに失敗しました', 'err'); }
+    }).catch(function (e) { toast(e.message, 'err'); });
+  }
+  function deleteAccount() {
+    modal('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><b style="color:var(--red)">アカウントを削除</b><button class="btn sec" style="padding:6px 10px" onclick="aqCloseModal()">✕</button></div>' +
+      '<div class="muted" style="line-height:1.7;margin-bottom:12px">水槽・記録・画像などあなたのデータが削除されます（投稿は匿名化）。元に戻せません。続けるには <b>DELETE</b> と入力してください。</div>' +
+      inputRow('da-confirm', '確認文字', '') +
+      '<button class="btn full" id="da-go" style="background:var(--red);color:#fff">削除する</button>');
+    document.getElementById('da-go').addEventListener('click', function () {
+      if (val('da-confirm') !== 'DELETE') { toast('「DELETE」と入力してください', 'err'); return; }
+      this.disabled = true; this.textContent = '削除中...';
+      api('deleteMyAccount', { confirmText: 'DELETE' }).then(function () { closeModal(); toast('アカウントを削除しました'); signOut(true); }).catch(function (e) { toast(e.message, 'err'); var b = document.getElementById('da-go'); if (b) { b.disabled = false; b.textContent = '削除する'; } });
+    });
   }
   function feedbackForm() {
     modal('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><b>問い合わせ・要望</b><button class="btn sec" style="padding:6px 10px" onclick="aqCloseModal()">✕</button></div>' +
