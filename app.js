@@ -320,18 +320,29 @@
     return '<div class="card"><b>はじめる</b><div class="muted" style="margin-top:8px">まずは水槽を登録しましょう。</div>' +
       '<button class="btn full" style="margin-top:12px" id="add-tank-btn">最初の水槽を追加</button></div>';
   }
+  function quickNote(kind, last) {
+    if (kind === 'water') return (last === null || last >= 7) ? { t: 'そろそろ', c: 'var(--yellow)' } : { t: 'OK', c: 'var(--green)' };
+    if (kind === 'feeding') return last === 0 ? { t: '今日済み', c: 'var(--green)' } : { t: '今日未実施', c: 'var(--orange)' };
+    if (kind === 'wq') return (last === null || last >= 14) ? { t: '測定おすすめ', c: 'var(--teal)' } : { t: 'OK', c: 'var(--green)' };
+    if (kind === 'maint') return (last === null || last >= 30) ? { t: 'そろそろ', c: 'var(--yellow)' } : { t: 'OK', c: 'var(--green)' };
+    return { t: '', c: 'var(--dim)' };
+  }
   function quickHtml() {
     if (!state.tanks || !state.tanks.length) return '';
-    var defs = [['換水', 'water', '#00D5E8'], ['給餌', 'feeding', '#D8F542'], ['水質測定', 'wq', '#35D7FF'], ['フィルター掃除', 'maint', '#8BA6B5']];
+    var defs = [['換水', 'water', '💧'], ['給餌', 'feeding', '🐟'], ['水質測定', 'wq', '🧪'], ['フィルター掃除', 'maint', '🔧']];
     var typeOf = { water: '水換え', feeding: '給餌', wq: '水質測定', maint: 'フィルター掃除' };
-    return '<div class="card"><b>クイック操作</b><div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-top:10px">' +
+    return '<div class="sec-hd" style="display:flex;justify-content:space-between;align-items:center;margin:4px 2px 10px"><b style="font-size:15px">クイック操作</b></div>' +
+      '<div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:12px">' +
       defs.map(function (a) {
         var last = lastRecordDays(typeOf[a[1]]);
-        var lastTxt = last === null ? '未実施' : last === 0 ? '今日' : '前回 ' + last + '日前';
-        return '<button class="btn sec" style="flex-direction:column;padding:10px 4px;font-size:11px;color:var(--text)" data-quick="' + a[1] + '">' +
-          '<div style="font-size:18px;color:' + a[2] + '">●</div><div style="font-weight:800;margin-top:4px">' + esc(a[0]) + '</div>' +
-          '<div class="muted" style="font-size:10px;margin-top:3px">' + esc(lastTxt) + '</div></button>';
-      }).join('') + '</div></div>';
+        var lastTxt = last === null ? '記録なし' : last === 0 ? '今日' : '前回' + last + '日前';
+        var note = quickNote(a[1], last);
+        return '<button data-quick="' + a[1] + '" style="background:linear-gradient(180deg,rgba(8,28,38,.98),rgba(3,13,19,.98));border:1px solid var(--border);border-radius:12px;padding:10px 4px;color:var(--text);cursor:pointer;text-align:center;font-family:inherit">' +
+          '<div style="font-size:20px;line-height:1;margin-bottom:7px">' + a[2] + '</div>' +
+          '<div style="font-weight:800;font-size:11px">' + esc(a[0]) + '</div>' +
+          '<div style="font-size:10px;color:var(--sub);margin:5px 0 3px">' + esc(lastTxt) + '</div>' +
+          '<div style="font-size:11px;font-weight:800;color:' + note.c + ';min-height:14px">' + esc(note.t) + '</div></button>';
+      }).join('') + '</div>';
   }
   function promoFoods() {
     var list = (state.foods || []).filter(function (f) { return f.affiliateLink && !f.hidden; });
