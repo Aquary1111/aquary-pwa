@@ -137,6 +137,8 @@
   }
   function renderLogin() {
     nav.style.display = 'none'; whoEl.innerHTML = '';
+    var mb = document.getElementById('menu-btn'); if (mb) mb.style.display = 'none';
+    closeDrawer();
     app.innerHTML = '<div class="center"><div>' +
       '<div style="font-size:54px;margin-bottom:8px">🐟</div><h2 style="margin:0 0 6px">Aquary</h2>' +
       '<div class="muted" style="margin-bottom:20px">水槽・水質・給餌・図鑑をまとめて管理</div>' +
@@ -216,7 +218,16 @@
   function boot() {
     if (!tokenValid()) { renderLogin(); return; }
     nav.style.display = 'flex';
-    app.innerHTML = loadingHtml();
+    var menuBtn = document.getElementById('menu-btn'); if (menuBtn) menuBtn.style.display = 'flex';
+    // まずキャッシュで即描画（体感速度向上）。その後 bootstrap で更新。
+    var cm = lsGet('me');
+    var showedCache = false;
+    if (cm) {
+      state.me = cm; state.tanks = lsGet('tanks') || state.tanks; state.settings = lsGet('settings') || {}; state.foods = lsGet('foods') || [];
+      paintWho(); renderDrawer();
+      if (!(state.me.needsTermsConsent && !state.me.isAdmin)) { setTab(state.tab || 'home'); showedCache = true; }
+    } else { app.innerHTML = loadingHtml(); }
+    updateQueueBanner();
     api('bootstrap').then(function (b) {
       b = b || {};
       state.me = b.me || state.me; lsSet('me', state.me);
@@ -224,29 +235,24 @@
       state.settings = b.settings || {}; lsSet('settings', state.settings);
       state.foods = b.foods || []; lsSet('foods', state.foods);
       state.feeding = b.feeding || {};
-      paintWho();
+      paintWho(); renderDrawer();
       if (state.me && state.me.needsTermsConsent && !state.me.isAdmin) { termsGate(); return; }
-      setTab(state.tab || 'home');
-      // クイック操作の「前回」表示用に記録を遅延取得
+      // 既に表示中のタブが home なら最新データで再描画。別タブを開いていれば触らない。
+      if (!showedCache) setTab(state.tab || 'home');
+      else if (state.tab === 'home') viewHome();
       api('getRecords', {}).then(function (r) { state.records = r || []; if (state.tab === 'home') viewHome(); }).catch(function () {});
-      // 通知バッジ
       refreshActivityBadge();
-      // オフライン中に貯まった書き込みを送信
-      updateQueueBanner(); flushQueue();
+      flushQueue();
     }).catch(function (e) {
-      var cm = lsGet('me');
-      if (cm) {
-        state.me = cm; state.tanks = lsGet('tanks') || []; state.settings = lsGet('settings') || {}; state.foods = lsGet('foods') || [];
-        paintWho(); setTab(state.tab || 'home'); updateQueueBanner();
-      } else {
-        app.innerHTML = '<div class="center"><div><div class="muted">' + esc(e.message) + '</div><button class="btn" style="margin-top:14px" onclick="location.reload()">再読み込み</button></div></div>';
-      }
+      if (showedCache) return; // キャッシュ表示済みなら何もしない（オフライン）
+      if (cm) { paintWho(); renderDrawer(); setTab(state.tab || 'home'); }
+      else app.innerHTML = '<div class="center"><div><div class="muted">' + esc(e.message) + '</div><button class="btn" style="margin-top:14px" onclick="location.reload()">再読み込み</button></div></div>';
     });
   }
   function paintWho() {
     var me = state.me || {};
-    whoEl.innerHTML = (me.avatarUrl ? '<img class="av" id="av-btn" src="' + esc(imgUrl(me.avatarUrl)) + '">' : '<span class="av" id="av-btn" style="display:grid;place-items:center">🐟</span>') ;
-    var b = document.getElementById('av-btn'); if (b) { b.style.cursor = 'pointer'; b.addEventListener('click', function () { setTab('account'); }); }
+    whoEl.innerHTML = (me.avatarUrl ? '<img class="av" id="av-btn" src="' + esc(imgUrl(me.avatarUrl)) + '">' : '<span class="av" id="av-btn" style="display:grid;place-items:center">🐟</span>');
+    var b = document.getElementById('av-btn'); if (b) { b.style.cursor = 'pointer'; b.addEventListener('click', openDrawer); }
   }
   function loadingHtml() { return '<div class="center"><div class="spin"></div></div>'; }
   function offlineBanner() { return state.online ? '' : '<div class="offline">📴 オフライン表示中（最後に取得した内容です）</div>'; }
@@ -262,10 +268,36 @@
         .catch(function (e) { toast(e.message, 'err'); var b = document.getElementById('terms-ok'); if (b) { b.disabled = false; b.textContent = '同意して始める'; } });
     });
   }
+  // ---------- 左ドロワー（メニュー） ----------
+  function renderDrawer() {
+    var me = state.me || {};
+    var av = document.getElementById('drawer-avatar'); if (av) av.innerHTML = me.avatarUrl ? '<img src="' + esc(imgUrl(me.avatarUrl)) + '">' : '🐟';
+    var nm = document.getElementById('drawer-name'); if (nm) nm.textContent = me.displayName || 'ユーザー';
+    var sub = document.getElementById('drawer-sub'); if (sub) sub.textContent = me.isAdmin ? '管理者' : (me.authenticated ? 'ログイン中' : '');
+    var menu = document.getElementById('drawer-menu'); if (!menu) return;
+    var items = [
+      ['👤', 'プロフィール', profileForm], ['📅', 'Googleカレンダー連携', calendarConnect],
+      ['🧰', '用品を管理', foodsView], ['✉️', '問い合わせ・要望', feedbackForm],
+    ];
+    if (me.isAdmin) items.push(['🛠', '管理者メンテナンス', adminView]);
+    items.push(['⬇️', 'データをエクスポート', exportData]);
+    if (!me.isAdmin) items.push(['🗑', 'アカウントを削除', deleteAccount]);
+    items.push(['⎋', 'ログアウト', function () { signOut(false); }]);
+    menu.innerHTML = '';
+    items.forEach(function (it) {
+      var btn = document.createElement('button'); btn.className = 'drawer-item';
+      btn.innerHTML = '<span class="di-ic">' + it[0] + '</span><span>' + esc(it[1]) + '</span>';
+      btn.addEventListener('click', function () { closeDrawer(); it[2](); });
+      menu.appendChild(btn);
+    });
+  }
+  function openDrawer() { renderDrawer(); var d = document.getElementById('drawer'), o = document.getElementById('drawer-overlay'); if (d) { d.classList.add('open'); d.setAttribute('aria-hidden', 'false'); } if (o) o.classList.add('open'); }
+  function closeDrawer() { var d = document.getElementById('drawer'), o = document.getElementById('drawer-overlay'); if (d) { d.classList.remove('open'); d.setAttribute('aria-hidden', 'true'); } if (o) o.classList.remove('open'); }
 
   // ---------- タブ制御 ----------
   function setTab(tab) {
-    state.tab = tab;
+    state.tab = tab; state.seq = (state.seq || 0) + 1; state.selTank = null; state.pubSel = null;
+    closeDrawer();
     [].forEach.call(nav.querySelectorAll('button'), function (b) { b.classList.toggle('on', b.getAttribute('data-tab') === tab); });
     if (tab === 'home') viewHome();
     else if (tab === 'tanks') viewTanks();
@@ -531,7 +563,7 @@
       [['設置日', t.setupDate || '未設定'], ['水量', (t.volume || '--')], ['タイプ', t.type || '--']].map(function (r) {
         return '<div><div class="muted" style="font-size:11px">' + r[0] + '</div><div style="font-weight:700;font-size:14px">' + esc(r[1]) + '</div></div>';
       }).join('') + '</div>' + paramGrid + '</div>' +
-      '<div class="card" style="padding:6px"><div style="display:flex;gap:4px;overflow:auto" id="det-tabs">' +
+      '<div class="card" style="padding:6px"><div style="display:flex;gap:4px;overflow:auto" id="det-tabs" data-noswipe>' +
       DETAIL_TABS.map(function (d) { return '<button class="btn sec" style="flex:1;font-size:12px;padding:8px 4px' + (state.tankTab === d[0] ? ';background:var(--accent);color:#00151d' : '') + '" data-dt="' + d[0] + '">' + d[1] + '</button>'; }).join('') +
       '</div></div>' +
       '<div id="det-body"></div>';
@@ -917,7 +949,7 @@
     [].forEach.call(nav.querySelectorAll('button'), function (b) { b.classList.remove('on'); });
     app.innerHTML = offlineBanner() +
       '<div style="display:flex;align-items:center;gap:10px;padding:4px 2px 8px"><button class="btn sec" style="padding:6px 10px" id="ad-back">←</button><h2 style="margin:0;font-size:20px;flex:1">管理者メンテ</h2></div>' +
-      '<div class="card" style="padding:6px"><div style="display:flex;gap:4px;overflow:auto">' +
+      '<div class="card" style="padding:6px"><div style="display:flex;gap:4px;overflow:auto" data-noswipe>' +
       ADMIN_TABS.map(function (d) { return '<button class="btn sec" style="font-size:12px;padding:8px 6px;white-space:nowrap' + (state.adminTab === d[0] ? ';background:var(--accent);color:#00151d' : '') + '" data-adt="' + d[0] + '">' + d[1] + '</button>'; }).join('') +
       '</div></div><div id="ad-body">' + detLoading() + '</div>';
     document.getElementById('ad-back').addEventListener('click', function () { setTab('account'); });
@@ -1023,9 +1055,11 @@
 
   // ================= 公開水槽 =================
   function viewPublic() {
+    var seq = state.seq;
     if (state.publicTanks) { paintPublic(state.publicTanks); }
     else app.innerHTML = loadingHtml();
-    api('getPublicTanks').then(function (d) { state.publicTanks = d || []; lsSet('publicTanks', state.publicTanks); paintPublic(state.publicTanks); }).catch(function (e) {
+    api('getPublicTanks').then(function (d) { state.publicTanks = d || []; lsSet('publicTanks', state.publicTanks); if (state.seq === seq) paintPublic(state.publicTanks); }).catch(function (e) {
+      if (state.seq !== seq) return;
       if (!state.publicTanks) { var c = lsGet('publicTanks'); if (c) { state.publicTanks = c; paintPublic(c); } else app.innerHTML = offlineBanner() + '<div class="card"><div class="muted">読み込みに失敗しました：' + esc(e.message) + '</div></div>'; }
       else toast(e.message, 'err');
     });
@@ -1131,7 +1165,7 @@
       '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 2px 8px"><h2 style="margin:0;font-size:20px">図鑑</h2><button class="btn" style="padding:8px 12px;font-size:13px" id="enc-add">＋ 追加</button></div>' +
       '<div class="card" style="padding:10px">' +
       '<div style="display:flex;gap:8px;margin-bottom:8px"><input id="enc-q" value="' + esc(state.encQuery || '') + '" placeholder="名前・学名・分類・分布で検索" style="flex:1;padding:9px;background:var(--card2);border:1px solid var(--border);border-radius:9px;color:var(--text)"><button class="btn" style="padding:8px 12px;font-size:13px" id="enc-search">検索</button></div>' +
-      '<div style="display:flex;gap:6px;overflow:auto;margin-bottom:8px">' + ENC_CATS.map(function (c) { return '<button class="btn sec" style="font-size:12px;padding:6px 10px;white-space:nowrap' + ((state.encCat || 'すべて') === c ? ';background:var(--accent);color:#00151d' : '') + '" data-ecat="' + esc(c) + '">' + esc(c) + '</button>'; }).join('') + '</div>' +
+      '<div style="display:flex;gap:6px;overflow:auto;margin-bottom:8px" data-noswipe>' + ENC_CATS.map(function (c) { return '<button class="btn sec" style="font-size:12px;padding:6px 10px;white-space:nowrap' + ((state.encCat || 'すべて') === c ? ';background:var(--accent);color:#00151d' : '') + '" data-ecat="' + esc(c) + '">' + esc(c) + '</button>'; }).join('') + '</div>' +
       '<select id="enc-sort" style="width:100%;padding:9px;background:var(--card2);border:1px solid var(--border);border-radius:9px;color:var(--text)">' + ENC_SORTS.map(function (s) { return '<option' + ((state.encSort || '更新順') === s ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('') + '</select>' +
       '</div><div id="enc-grid"></div>';
     document.getElementById('enc-add').addEventListener('click', function () { encForm(null); });
@@ -1233,22 +1267,26 @@
   }
 
   // ================= 通知 =================
+  function setNavBadge(n) {
+    var b = document.getElementById('nav-badge'); if (!b) return;
+    if (n > 0) { b.textContent = n > 99 ? '99+' : String(n); b.style.display = 'block'; } else b.style.display = 'none';
+  }
   function refreshActivityBadge() {
     api('getMyActivity').then(function (a) {
       state.activity = a || { items: [], seenAt: '' };
       var seen = parseDate(state.activity.seenAt);
       var unread = (state.activity.items || []).filter(function (it) { var d = parseDate(it.createdAt); return d && (!seen || d > seen); }).length;
-      var w = document.getElementById('actbadge-wrap');
-      if (w) w.innerHTML = '通知' + (unread ? '<span style="background:var(--red);color:#fff;border-radius:999px;font-size:9px;padding:1px 5px;margin-left:3px">' + unread + '</span>' : '');
+      setNavBadge(unread);
     }).catch(function () {});
   }
   function viewActivity() {
+    var seq = state.seq;
     if (state.activity) paintActivity(state.activity);
     else app.innerHTML = loadingHtml();
     api('getMyActivity').then(function (a) {
-      state.activity = a || { items: [], seenAt: '' }; paintActivity(state.activity);
-      api('markActivitySeen').then(function () { var w = document.getElementById('actbadge-wrap'); if (w) w.innerHTML = '通知'; }).catch(function () {});
-    }).catch(function (e) { if (!state.activity) app.innerHTML = offlineBanner() + '<div class="card"><div class="muted">読み込みに失敗しました：' + esc(e.message) + '</div></div>'; });
+      state.activity = a || { items: [], seenAt: '' }; if (state.seq === seq) paintActivity(state.activity);
+      api('markActivitySeen').then(function () { setNavBadge(0); }).catch(function () {});
+    }).catch(function (e) { if (state.seq === seq && !state.activity) app.innerHTML = offlineBanner() + '<div class="card"><div class="muted">読み込みに失敗しました：' + esc(e.message) + '</div></div>'; });
   }
   function paintActivity(a) {
     var items = (a && a.items) || [];
@@ -1372,6 +1410,32 @@
   // ---------- 起動 ----------
   (function () { var s = lsGet('token'); if (s && s.t && s.exp - Date.now() > 30 * 1000) { state.token = s.t; state.exp = s.exp; } })();
   nav.addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) setTab(b.getAttribute('data-tab')); });
+  (function () { var mb = document.getElementById('menu-btn'); if (mb) mb.addEventListener('click', openDrawer); var ov = document.getElementById('drawer-overlay'); if (ov) ov.addEventListener('click', closeDrawer); })();
+  // 左右スワイプ：タブ切替／左端から右(またはホームで右)でドロワー（GAS準拠）
+  (function () {
+    var sx = 0, sy = 0, st = 0, tracking = false, fromEdge = false;
+    var MAINS = ['home', 'tanks', 'public', 'enc', 'activity'];
+    function blocked(t) { try { return !!(t && t.closest && t.closest('input,textarea,select,#drawer,#aq-modal,[data-noswipe]')); } catch (e) { return false; } }
+    document.addEventListener('touchstart', function (e) {
+      if (!e.touches || e.touches.length !== 1) { tracking = false; return; }
+      var t = e.touches[0]; sx = t.clientX; sy = t.clientY; st = Date.now(); tracking = true; fromEdge = t.clientX <= 28;
+    }, { passive: true });
+    document.addEventListener('touchend', function (e) {
+      if (!tracking) return; tracking = false;
+      var t = e.changedTouches && e.changedTouches[0]; if (!t) return;
+      var dx = t.clientX - sx, dy = t.clientY - sy, dt = Date.now() - st;
+      if (dt > 700 || Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.6) return;
+      var d = document.getElementById('drawer');
+      if (d && d.classList.contains('open')) { if (dx < 0) closeDrawer(); return; }
+      if (!state.token || blocked(e.target) || document.getElementById('aq-modal')) return;
+      if (fromEdge && dx > 0) { openDrawer(); return; }
+      if (MAINS.indexOf(state.tab) < 0 || state.selTank || state.pubSel) return;
+      if (dx > 0 && state.tab === 'home') { openDrawer(); return; }
+      var idx = MAINS.indexOf(state.tab), next = idx + (dx < 0 ? 1 : -1);
+      if (next < 0 || next >= MAINS.length) return;
+      setTab(MAINS[next]);
+    }, { passive: true });
+  })();
   window.addEventListener('online', function () { state.online = true; if (state.token) { flushQueue(); setTab(state.tab); } });
   window.addEventListener('offline', function () { state.online = false; });
   if ('serviceWorker' in navigator) window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });

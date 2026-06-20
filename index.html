@@ -53,11 +53,27 @@
   .inp{width:100%;background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);font-size:14px;font-family:inherit;outline:none}
   .inp:focus{border-color:var(--teal)}
   nav{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:480px;background:rgba(4,10,14,.93);border-top:1px solid var(--border);display:flex;padding:8px 0 calc(12px + env(safe-area-inset-bottom));backdrop-filter:blur(16px);z-index:200}
-  nav button{flex:1;background:none;border:none;color:var(--dim);font-size:10px;padding:4px 0;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px}
-  nav button .ic{width:40px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:17px;line-height:1;transition:background .2s}
-  nav button.on{color:var(--teal)}
-  nav button.on{font-weight:700}
+  nav button{flex:1;background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px 0}
+  nav button .ic{width:40px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;transition:background .2s;position:relative}
+  nav button .ni{font-size:18px;color:var(--dim);line-height:1}
+  nav button .nl{font-size:10px;color:var(--dim)}
   nav button.on .ic{background:var(--tg)}
+  nav button.on .ni{color:var(--teal)}
+  nav button.on .nl{color:var(--teal);font-weight:700}
+  .nav-badge{display:none;position:absolute;top:-3px;right:-2px;background:var(--red);color:#fff;border-radius:999px;min-width:15px;height:15px;line-height:15px;font-size:9px;font-weight:800;text-align:center;padding:0 3px}
+  /* ハンバーガー＋左ドロワー（GAS準拠） */
+  .menu-btn{background:var(--card2);border:1px solid var(--border);color:var(--text);width:36px;height:36px;border-radius:10px;font-size:17px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0}
+  #drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;opacity:0;visibility:hidden;transition:opacity .2s}
+  #drawer-overlay.open{opacity:1;visibility:visible}
+  #drawer{position:fixed;top:0;left:0;height:100%;width:80%;max-width:300px;background:var(--bg2);border-right:1px solid var(--border);z-index:301;transform:translateX(-103%);transition:transform .22s ease;display:flex;flex-direction:column;box-shadow:2px 0 18px rgba(0,0,0,.45)}
+  #drawer.open{transform:translateX(0)}
+  #drawer-head{display:flex;align-items:center;gap:12px;padding:22px 18px 16px;border-bottom:1px solid var(--border)}
+  #drawer-avatar{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,var(--teal2),var(--teal));display:flex;align-items:center;justify-content:center;font-size:23px;overflow:hidden;flex-shrink:0}
+  #drawer-avatar img{width:100%;height:100%;object-fit:cover}
+  #drawer-menu{padding:10px 12px;display:flex;flex-direction:column;gap:4px;overflow:auto}
+  .drawer-item{display:flex;align-items:center;gap:14px;width:100%;background:none;border:none;color:var(--text);font-family:inherit;font-size:15px;font-weight:700;text-align:left;padding:13px 12px;border-radius:12px;cursor:pointer}
+  .drawer-item:active{background:var(--card2)}
+  .drawer-item .di-ic{font-size:18px;width:24px;text-align:center;color:var(--teal)}
   .center{min-height:60vh;display:grid;place-items:center;text-align:center;padding:24px}
   .spin{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--teal);border-radius:50%;animation:sp .8s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
@@ -70,6 +86,7 @@
 </head>
 <body>
 <header>
+  <button class="menu-btn" id="menu-btn" aria-label="メニュー" style="display:none">☰</button>
   <h1>Aquary 🐟</h1>
   <div class="who" id="who"></div>
 </header>
@@ -77,12 +94,20 @@
   <div class="center"><div class="spin"></div></div>
 </main>
 <nav id="nav" style="display:none">
-  <button data-tab="home" class="on"><span class="ic">🏠</span>ホーム</button>
-  <button data-tab="tanks"><span class="ic">🐠</span>水槽</button>
-  <button data-tab="public"><span class="ic">🌊</span>公開水槽</button>
-  <button data-tab="enc"><span class="ic">📖</span>図鑑</button>
-  <button data-tab="activity"><span class="ic">🔔</span><span id="actbadge-wrap">通知</span></button>
+  <button data-tab="home" class="on"><div class="ic"><span class="ni">⌂</span></div><span class="nl">ホーム</span></button>
+  <button data-tab="tanks"><div class="ic"><span class="ni">◈</span></div><span class="nl">水槽</span></button>
+  <button data-tab="public"><div class="ic"><span class="ni">◉</span></div><span class="nl">公開水槽</span></button>
+  <button data-tab="enc"><div class="ic"><span class="ni">⊞</span></div><span class="nl">図鑑</span></button>
+  <button data-tab="activity"><div class="ic"><span class="ni">♡</span><span class="nav-badge" id="nav-badge"></span></div><span class="nl">通知</span></button>
 </nav>
+<div id="drawer-overlay"></div>
+<div id="drawer" aria-hidden="true">
+  <div id="drawer-head">
+    <div id="drawer-avatar">🐟</div>
+    <div style="min-width:0"><div id="drawer-name" style="font-weight:800;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">ユーザー</div><div id="drawer-sub" style="color:var(--sub);font-size:12px"></div></div>
+  </div>
+  <div id="drawer-menu"></div>
+</div>
 
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="config.js"></script>
