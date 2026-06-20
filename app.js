@@ -7,7 +7,7 @@
   'use strict';
   var CFG = window.AQUARY_CONFIG || {};
   // アプリの版数。コード更新のたびに上げる（sw.js の CACHE と揃える）。画面に表示して反映確認に使う。
-  var APP_VERSION = 'v15';
+  var APP_VERSION = 'v16';
   var app = document.getElementById('app');
   var nav = document.getElementById('nav');
   var whoEl = document.getElementById('who');
@@ -331,7 +331,7 @@
     tanks.forEach(function (t) {
       var base = { tankId: t.id, tankName: t.name, photoUrl: t.photoUrl || '', tankType: t.type || '' };
       var d = daysUntil(t.nextChange);
-      if (d !== null && d <= 0) items.push(Object.assign({}, base, { priority: 10, kind: 'water', tone: 'warn', title: '換水が必要です', body: '予定日を過ぎています', todo: 'water', actionText: '換水する' }));
+      if (d !== null && d <= 0) items.push(Object.assign({}, base, { priority: 10, kind: 'water', tone: 'warn', title: '換水が必要です', body: '前回から7日経過', todo: 'water', actionText: '換水する' }));
       else if (d !== null && d <= 3) items.push(Object.assign({}, base, { priority: 40, kind: 'water', tone: 'near', title: '換水が近いです', body: '次回 ' + fmtDate(t.nextChange), todo: 'water', actionText: '換水する' }));
       var df = feedingDue(t.id);
       if (df.length) items.push(Object.assign({}, base, { priority: 20, kind: 'feeding', tone: 'good', title: '給餌の時間です', body: df[0].foodName || '予定時刻です', todo: 'feeding', scheduleId: df[0].id, actionText: '給餌する' }));
@@ -341,11 +341,23 @@
     return items.sort(function (a, b) { return (a.priority || 99) - (b.priority || 99); });
   }
   function toneColor(tone) { return tone === 'bad' ? 'var(--red)' : tone === 'warn' ? 'var(--yellow,#ffcf5a)' : 'var(--accent)'; }
+  function doneTodayHtml() {
+    if (!state.records) return '';
+    var t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    var done = state.records.filter(function (r) { var d = parseDate(r.createdAt); return d && d.getTime() >= t0.getTime(); }).slice(0, 4);
+    if (!done.length) return '';
+    return '<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:8px">' +
+      '<div class="muted" style="font-size:11px;margin-bottom:4px">今日完了</div>' +
+      done.map(function (r) {
+        var d = parseDate(r.createdAt); var hm = d ? (d.getHours() < 10 ? '0' : '') + d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes() : '';
+        return '<div style="display:flex;justify-content:space-between;gap:8px;color:var(--dim);font-size:12px;padding:2px 0"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc((r.tankName ? r.tankName + ' / ' : '') + (r.type || '')) + '</span><span>' + esc(hm) + '</span></div>';
+      }).join('') + '</div>';
+  }
   function todoHtml() {
     if (state.tanks === null) return '';
     if (!state.tanks.length) return gettingStartedHtml();
     var items = todoItems();
-    if (!items.length) return '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b>今日やること</b><span class="pill" style="color:var(--good)">0件</span></div><div class="muted">急ぎの作業はありません。水槽の様子を軽く見ておきましょう。</div></div>';
+    if (!items.length) return '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b>今日やること</b><span class="pill" style="color:var(--good)">0件</span></div><div class="muted">急ぎの作業はありません。水槽の様子を軽く見ておきましょう。</div>' + doneTodayHtml() + '</div>';
     return '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b>今日やること</b><span class="pill" style="color:#ffb4b4;background:#3a1414;border-color:#6b2a2a">' + items.length + '件</span></div>' +
       items.slice(0, 6).map(function (x) {
         return '<div class="row">' +
@@ -353,17 +365,18 @@
           '<div style="flex:1;min-width:0"><div class="ttl" style="font-size:13px">' + esc(x.tankName || '水槽') + '</div>' +
           '<div class="meta">' + esc(x.title) + ' <span style="color:' + toneColor(x.tone) + '">' + esc(x.body) + '</span></div></div>' +
           '<button class="btn" style="padding:8px 12px;font-size:12px" data-todo="' + esc(JSON.stringify(x)) + '">' + esc(x.actionText) + '</button></div>';
-      }).join('') + '</div>';
+      }).join('') + doneTodayHtml() + '</div>';
   }
   function gettingStartedHtml() {
     return '<div class="card"><b>はじめる</b><div class="muted" style="margin-top:8px">まずは水槽を登録しましょう。</div>' +
       '<button class="btn full" style="margin-top:12px" id="add-tank-btn">最初の水槽を追加</button></div>';
   }
   function quickNote(kind, last) {
-    if (kind === 'water') return (last === null || last >= 7) ? { t: 'そろそろ', c: 'var(--yellow)' } : { t: 'OK', c: 'var(--green)' };
-    if (kind === 'feeding') return last === 0 ? { t: '今日済み', c: 'var(--green)' } : { t: '今日未実施', c: 'var(--orange)' };
-    if (kind === 'wq') return (last === null || last >= 14) ? { t: '測定おすすめ', c: 'var(--teal)' } : { t: 'OK', c: 'var(--green)' };
-    if (kind === 'maint') return (last === null || last >= 30) ? { t: 'そろそろ', c: 'var(--yellow)' } : { t: 'OK', c: 'var(--green)' };
+    // GAS版 quickActionMeta と同じ判定にそろえる
+    if (kind === 'feeding') return last === 0 ? { t: '実施済み', c: 'var(--green)' } : { t: '今日未実施', c: 'var(--red)' };
+    if (kind === 'water') return last === null ? { t: '記録なし', c: 'var(--dim)' } : last >= 7 ? { t: 'そろそろ', c: 'var(--yellow)' } : { t: '良好', c: 'var(--green)' };
+    if (kind === 'wq') return last === null ? { t: '記録なし', c: 'var(--dim)' } : last >= 3 ? { t: '測定おすすめ', c: 'var(--yellow)' } : { t: '良好', c: 'var(--green)' };
+    if (kind === 'maint') return last === null ? { t: '記録なし', c: 'var(--dim)' } : last >= 14 ? { t: 'そろそろ', c: 'var(--yellow)' } : { t: '良好', c: 'var(--green)' };
     return { t: '', c: 'var(--dim)' };
   }
   function quickIcon(kind) {
@@ -383,7 +396,7 @@
       '<div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:12px">' +
       defs.map(function (a) {
         var last = lastRecordDays(typeOf[a[1]]);
-        var lastTxt = last === null ? '記録なし' : last === 0 ? '今日' : '前回' + last + '日前';
+        var lastTxt = last === null ? '未記録' : last === 0 ? '今日' : '前回 ' + last + '日前';
         var note = quickNote(a[1], last);
         return '<button data-quick="' + a[1] + '" style="background:linear-gradient(180deg,rgba(8,28,38,.98),rgba(3,13,19,.98));border:1px solid var(--border);border-radius:12px;padding:10px 4px;color:var(--text);cursor:pointer;text-align:center;font-family:inherit">' +
           '<div style="color:' + a[2] + ';margin-bottom:7px">' + quickIcon(a[1]) + '</div>' +
@@ -499,45 +512,54 @@
   }
 
   // ================= 水槽 =================
-  function tankCard(t) {
-    var params = [['水温', t.temp, '°C'], ['pH', t.ph, ''], ['GH', t.gh, ''], ['KH', t.kh, '']];
-    var sc = t.status === '危険' ? 'var(--red)' : t.status === '注意' ? 'var(--yellow,#ffcf5a)' : 'var(--good)';
-    var d = daysUntil(t.nextChange);
-    return '<div class="card">' +
-      '<div style="display:flex;gap:12px;align-items:center;margin-bottom:10px">' +
-      (t.photoUrl ? '<img class="thumb" style="width:56px;height:56px" src="' + esc(imgUrl(t.photoUrl)) + '">' : '<div class="thumb" style="width:56px;height:56px;display:grid;place-items:center;font-size:24px">🐠</div>') +
-      '<div style="flex:1;min-width:0"><div class="ttl">' + esc(t.name || '水槽') + '</div>' +
-      '<div class="meta">' + esc(t.type || '') + (t.volume ? ' ・ ' + esc(t.volume) + (/[0-9]$/.test(String(t.volume)) ? 'L' : '') : '') + '</div></div>' +
-      '<span class="pill" style="color:' + sc + '">' + esc(t.status || '良好') + '</span></div>' +
-      '<div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:10px">' +
-      params.map(function (p) { return '<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:6px;text-align:center"><div class="muted" style="font-size:10px">' + p[0] + '</div><div style="font-weight:700;font-size:14px">' + (p[1] !== undefined && p[1] !== '' ? esc(p[1]) : '--') + '</div></div>'; }).join('') +
-      '</div>' +
-      '<div class="meta" style="margin-bottom:8px">次回換水: ' + (t.nextChange ? esc(fmtDate(t.nextChange)) + (d !== null && d <= 0 ? '（期限超過）' : d !== null ? '（あと' + d + '日）' : '') : '未設定') + '</div>' +
-      '<div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr;gap:6px">' +
-      [['換水', 'water'], ['給餌', 'feeding'], ['水質', 'wq'], ['掃除', 'maint']].map(function (a) {
-        return '<button class="btn sec" style="font-size:11px;padding:8px 4px" data-act="' + a[1] + '" data-tid="' + esc(t.id) + '" data-tn="' + esc(t.name || '') + '">' + esc(a[0]) + '</button>';
-      }).join('') +
-      '</div>' +
-      '<button class="btn sec full" style="margin-top:8px;font-size:12px" data-open="' + esc(t.id) + '">詳細を見る ›</button>' +
-      '</div>';
+  function isDueDate(v) { var n = daysUntil(v); return n !== null && n <= 0; }
+  function isNearDate(v, n) { var d = daysUntil(v); return d !== null && d > 0 && d <= n; }
+  function fmtDayWithWeek(v) { var d = parseDate(v); if (!d) return '未設定'; return (d.getMonth() + 1) + '/' + d.getDate() + '(' + ['日', '月', '火', '水', '木', '金', '土'][d.getDay()] + ')'; }
+  function tankStatusReason(t) {
+    var bad = []; PARAMS.forEach(function (p) { var v = t[p.key]; if (v === '' || v == null) return; if (pColor(p.key, v, t) !== 'var(--good)') bad.push(p.label); });
+    return bad.length ? bad.slice(0, 3).join('・') + 'が基準外です' : '';
   }
+  function statusBadge(s) {
+    var c = s === '危険' ? 'bad' : s === '注意' ? 'warn' : 'good';
+    var col = c === 'bad' ? 'var(--red)' : c === 'warn' ? 'var(--yellow)' : 'var(--green)';
+    var bg = c === 'bad' ? 'rgba(232,85,85,.1)' : c === 'warn' ? 'rgba(245,200,66,.1)' : 'rgba(61,219,124,.1)';
+    return '<span class="pill" style="color:' + col + ';background:' + bg + '">' + esc(s || '良好') + '</span>';
+  }
+  // GAS版 tankCard 準拠：写真を上部バナー、水温/pH/容量、次回換水ピル、カード全体タップで詳細
+  function tankCard(t) {
+    var sc = t.status === '良好' ? 'var(--green)' : t.status === '注意' ? 'var(--yellow)' : 'var(--red)';
+    var emoji = t.type === '海水' ? '🐡' : t.type === 'ビオトープ' ? '🌾' : '🌿';
+    var temp = (t.temp !== undefined && t.temp !== null && t.temp !== '') ? esc(t.temp) + '°C' : '未測定';
+    var ph = (t.ph !== undefined && t.ph !== null && t.ph !== '') ? esc(t.ph) : '未測定';
+    var nextSet = t.nextChange && t.nextChange !== '未設定';
+    var due = isDueDate(t.nextChange), near = isNearDate(t.nextChange, 3);
+    var nextColor = due ? 'var(--yellow)' : near ? 'var(--yellow)' : 'var(--teal)';
+    var nextBg = due ? 'rgba(240,120,48,.14)' : near ? 'rgba(255,209,102,.12)' : 'rgba(0,201,228,.08)';
+    var reason = tankStatusReason(t);
+    return '<div class="card-sm" style="margin-bottom:12px;cursor:pointer;overflow:hidden;padding:0" data-open="' + esc(t.id) + '">' +
+      '<div class="timg" style="height:130px;border-radius:14px 14px 0 0;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;background:linear-gradient(135deg,#061825,#0A2D3F)">' +
+      (t.photoUrl ? '<img src="' + esc(imgUrl(t.photoUrl)) + '" style="width:100%;height:100%;object-fit:cover">' : '<span style="font-size:52px">' + emoji + '</span>') +
+      '</div>' +
+      '<div style="padding:11px 14px 13px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;gap:8px">' +
+      '<span style="font-weight:700;font-size:15px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(t.name || '水槽') + (t.favorite ? '⭐' : '') + '</span>' +
+      '<span style="display:flex;gap:5px;align-items:center;flex-shrink:0">' + (isPublicTank(t) ? '<span class="pill" style="color:var(--teal)">公開</span>' : '') + statusBadge(t.status || '良好') + '</span></div>' +
+      '<div style="display:flex;gap:10px;color:var(--sub);font-size:12px;margin-bottom:8px;flex-wrap:wrap"><span>水温 ' + temp + '</span><span>pH ' + ph + '</span>' + (t.volume ? '<span>' + esc(t.volume) + (/[0-9]$/.test(String(t.volume)) ? 'L' : '') + '</span>' : '') + '</div>' +
+      (reason ? '<div style="color:var(--yellow);font-size:11px;margin:-3px 0 8px">' + esc(reason) + '</div>' : '') +
+      '<div style="display:flex;justify-content:space-between;align-items:center">' +
+      (nextSet ? '<span style="background:' + nextBg + ';border:1px solid ' + nextColor + '33;color:' + nextColor + ';font-size:12px;border-radius:999px;padding:4px 9px;font-weight:700">次回換水 ' + fmtDayWithWeek(t.nextChange) + '</span>' : '<span class="muted" style="font-size:12px">次回換水 未設定</span>') +
+      '<div style="width:8px;height:8px;border-radius:50%;background:' + sc + '"></div>' +
+      '</div></div></div>';
+  }
+  function tankSortRank(t) { return t.status === '危険' ? 0 : t.status === '注意' ? 1 : isDueDate(t.nextChange) ? 2 : isNearDate(t.nextChange, 3) ? 3 : 4; }
   function viewTanks() {
+    var tanks = (state.tanks || []).slice().sort(function (a, b) { return tankSortRank(a) - tankSortRank(b); });
     app.innerHTML = offlineBanner() +
-      '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 2px 10px"><h2 style="margin:0;font-size:20px">水槽</h2><button class="btn" style="padding:8px 12px;font-size:13px" id="add-tank2">＋ 追加</button></div>' +
-      ((state.tanks && state.tanks.length) ? state.tanks.map(tankCard).join('') : '<div class="card"><div class="muted">水槽がまだありません。</div></div>');
+      '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 2px 10px"><h2 style="margin:0;font-size:20px;font-weight:900;letter-spacing:-.02em">水槽</h2><button class="btn" style="padding:8px 14px;font-size:13px" id="add-tank2">＋ 追加</button></div>' +
+      (tanks.length ? tanks.map(tankCard).join('') : '<div class="card"><div class="muted">水槽がまだありません。「＋追加」から登録しましょう。</div></div>');
     var a = document.getElementById('add-tank2'); if (a) a.addEventListener('click', addTankModal);
-    [].forEach.call(app.querySelectorAll('[data-act]'), function (b) {
-      b.addEventListener('click', function () {
-        var kind = b.getAttribute('data-act'), tid = b.getAttribute('data-tid'), tn = b.getAttribute('data-tn');
-        if (!confirm('「' + tn + '」の' + QLABEL[kind] + 'を記録しますか？')) return;
-        recordAction(tid, tn, QTYPE[kind]);
-      });
-    });
     [].forEach.call(app.querySelectorAll('[data-open]'), function (b) {
-      b.addEventListener('click', function () {
-        var id = b.getAttribute('data-open'); var t = (state.tanks || []).filter(function (x) { return x.id === id; })[0];
-        if (t) openDetail(t);
-      });
+      b.addEventListener('click', function () { var id = b.getAttribute('data-open'); var t = (state.tanks || []).filter(function (x) { return x.id === id; })[0]; if (t) openDetail(t); });
     });
   }
 
