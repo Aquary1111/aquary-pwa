@@ -1205,12 +1205,14 @@
     var me = state.me || {};
     app.innerHTML = offlineBanner() + '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h2 style="margin:0;font-size:18px">アカウント</h2><button class="btn sec" style="padding:6px 10px" onclick="aqCloseModal()" id="acc-back">ホームへ</button></div>' +
       '<div class="row"><div style="flex:1"><div class="ttl">' + esc(me.displayName || 'ユーザー') + '</div><div class="meta">' + esc(me.accountLabel || '') + (me.isAdmin ? ' ・ 管理者' : '') + '</div></div></div></div>' +
+      '<button class="btn sec full" id="acc-cal" style="margin-bottom:8px">📅 Googleカレンダー連携' + (me.calendarConnected ? '（連携済み）' : '') + '</button>' +
       '<button class="btn sec full" id="acc-foods" style="margin-bottom:8px">🧰 用品を管理</button>' +
       '<button class="btn sec full" id="acc-feedback" style="margin-bottom:8px">✉️ 問い合わせ・要望を送る</button>' +
       (me.isAdmin ? '<button class="btn sec full" id="acc-admin" style="margin-bottom:8px">🛠 管理者メンテナンス</button>' : '') +
       '<button class="btn sec full" id="signout">ログアウト</button>' +
       '<div class="muted" style="text-align:center;margin-top:18px">Aquary PWA</div>';
     document.getElementById('acc-back').addEventListener('click', function () { setTab('home'); });
+    document.getElementById('acc-cal').addEventListener('click', function () { calendarConnect(); });
     document.getElementById('acc-foods').addEventListener('click', function () { foodsView(); });
     document.getElementById('acc-feedback').addEventListener('click', function () { feedbackForm(); });
     var adm = document.getElementById('acc-admin'); if (adm) adm.addEventListener('click', function () { adminView(); });
@@ -1230,6 +1232,25 @@
       this.disabled = true; this.textContent = '送信中...';
       api('submitFeatureRequest', { type: val('fb-type'), title: title, priority: val('fb-priority'), detail: detail }).then(function () { closeModal(); toast('送信しました。ありがとうございます！'); }).catch(function (e) { toast(e.message, 'err'); var b = document.getElementById('fb-save'); if (b) { b.disabled = false; b.textContent = '送信する'; } });
     });
+  }
+  function calendarConnect() {
+    var connected = state.me && state.me.calendarConnected;
+    if (connected) {
+      if (!confirm('Googleカレンダー連携を解除しますか？')) return;
+      api('disconnectUserCalendar').then(function () {
+        toast('連携を解除しました'); if (state.me) state.me.calendarConnected = false; lsSet('me', state.me); viewAccount();
+      }).catch(function (e) { toast(e.message, 'err'); });
+      return;
+    }
+    toast('連携URLを準備中...');
+    api('startCalendarConnectForApi').then(function (r) {
+      var url = r && r.connectUrl;
+      if (!url) { toast('連携URLを取得できませんでした', 'err'); return; }
+      modal('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><b>Googleカレンダー連携</b><button class="btn sec" style="padding:6px 10px" onclick="aqCloseModal()">✕</button></div>' +
+        '<div class="muted" style="font-size:13px;line-height:1.7;margin-bottom:12px">下のボタンでGoogleの認証画面を開きます。許可するとカレンダー連携が完了します。認証後はこのアプリに戻り、画面を一度リロードしてください（連携状態が反映されます）。</div>' +
+        '<a class="btn full" href="' + esc(url) + '" target="_blank" rel="noopener" id="cal-go" style="text-decoration:none;text-align:center;display:block">Googleで連携する</a>');
+      var g = document.getElementById('cal-go'); if (g) g.addEventListener('click', function () { setTimeout(closeModal, 500); });
+    }).catch(function (e) { toast(e.message, 'err'); });
   }
 
   // ---------- 起動 ----------
