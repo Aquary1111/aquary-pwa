@@ -6,6 +6,8 @@
 (function () {
   'use strict';
   var CFG = window.AQUARY_CONFIG || {};
+  // アプリの版数。コード更新のたびに上げる（sw.js の CACHE と揃える）。画面に表示して反映確認に使う。
+  var APP_VERSION = 'v15';
   var app = document.getElementById('app');
   var nav = document.getElementById('nav');
   var whoEl = document.getElementById('who');
@@ -145,6 +147,7 @@
       '<div id="gbtn" style="display:flex;justify-content:center"></div>' +
       (CFG.GOOGLE_CLIENT_ID && CFG.GOOGLE_CLIENT_ID.indexOf('apps.googleusercontent') >= 0 ? '' :
         '<div class="muted" style="margin-top:16px;color:var(--red)">config.js の GOOGLE_CLIENT_ID を設定してください。</div>') +
+      '<div class="muted" style="margin-top:24px;font-size:11px;opacity:.7">バージョン ' + esc(APP_VERSION) + '</div>' +
       '</div></div>';
     if (initGis()) {
       google.accounts.id.renderButton(document.getElementById('gbtn'), { theme: 'filled_blue', size: 'large', shape: 'pill', text: 'signin_with', locale: 'ja' });
@@ -165,7 +168,7 @@
     closeModal();
     var ov = document.createElement('div');
     ov.id = 'aq-modal';
-    ov.style.cssText = 'position:fixed;inset:0;background:#0009;z-index:30;display:flex;align-items:flex-end;justify-content:center';
+    ov.style.cssText = 'position:fixed;inset:0;background:#0009;z-index:500;display:flex;align-items:flex-end;justify-content:center';
     ov.addEventListener('click', function (e) { if (e.target === ov) closeModal(); });
     ov.innerHTML = '<div style="background:var(--card);border:1px solid var(--border);border-top-left-radius:16px;border-top-right-radius:16px;width:100%;max-width:560px;max-height:84vh;overflow:auto;padding:16px 16px calc(20px + env(safe-area-inset-bottom))">' + html + '</div>';
     document.body.appendChild(ov);
@@ -250,9 +253,8 @@
     });
   }
   function paintWho() {
-    var me = state.me || {};
-    whoEl.innerHTML = (me.avatarUrl ? '<img class="av" id="av-btn" src="' + esc(imgUrl(me.avatarUrl)) + '">' : '<span class="av" id="av-btn" style="display:grid;place-items:center">🐟</span>');
-    var b = document.getElementById('av-btn'); if (b) { b.style.cursor = 'pointer'; b.addEventListener('click', openDrawer); }
+    // 右上のユーザーアイコンは表示しない（メニューは左上の☰から）。ドロワーのアバターは renderDrawer で更新。
+    if (whoEl) whoEl.innerHTML = '';
   }
   function loadingHtml() { return '<div class="center"><div class="spin"></div></div>'; }
   function offlineBanner() { return state.online ? '' : '<div class="offline">📴 オフライン表示中（最後に取得した内容です）</div>'; }
@@ -290,6 +292,11 @@
       btn.addEventListener('click', function () { closeDrawer(); it[2](); });
       menu.appendChild(btn);
     });
+    var ver = document.createElement('div');
+    ver.className = 'muted';
+    ver.style.cssText = 'padding:14px 14px 4px;font-size:11px;opacity:.7';
+    ver.textContent = 'Aquary PWA ' + APP_VERSION;
+    menu.appendChild(ver);
   }
   function openDrawer() { renderDrawer(); var d = document.getElementById('drawer'), o = document.getElementById('drawer-overlay'); if (d) { d.classList.add('open'); d.setAttribute('aria-hidden', 'false'); } if (o) o.classList.add('open'); }
   function closeDrawer() { var d = document.getElementById('drawer'), o = document.getElementById('drawer-overlay'); if (d) { d.classList.remove('open'); d.setAttribute('aria-hidden', 'true'); } if (o) o.classList.remove('open'); }
@@ -359,9 +366,18 @@
     if (kind === 'maint') return (last === null || last >= 30) ? { t: 'そろそろ', c: 'var(--yellow)' } : { t: 'OK', c: 'var(--green)' };
     return { t: '', c: 'var(--dim)' };
   }
+  function quickIcon(kind) {
+    var paths = {
+      water: '<path d="M12 3C9 7.2 6 10.4 6 14a6 6 0 0 0 12 0c0-3.6-3-6.8-6-11z"></path><path d="M9.8 15.4c.5 1.1 1.5 1.8 2.9 1.8"></path>',
+      feeding: '<path d="M4 14c2.5-4 6.6-5.2 11.8-3.5L20 8v8l-4.2-2.5C10.6 15.2 6.5 18 4 14z"></path><path d="M15 10.5v3"></path><circle cx="8" cy="13" r=".8"></circle>',
+      wq: '<path d="M10 3h4"></path><path d="M11 3v5.2l-4.6 8.1A3.2 3.2 0 0 0 9.2 21h5.6a3.2 3.2 0 0 0 2.8-4.7L13 8.2V3"></path><path d="M8.2 15h7.6"></path>',
+      maint: '<path d="M14.7 6.3a4 4 0 0 0-5 5L4 17v3h3l5.7-5.7a4 4 0 0 0 5-5l-2.8 2.8-3-3 2.8-2.8z"></path>'
+    };
+    return '<svg viewBox="0 0 24 24" aria-hidden="true" style="width:24px;height:24px;display:block;margin:0 auto" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + (paths[kind] || '') + '</svg>';
+  }
   function quickHtml() {
     if (!state.tanks || !state.tanks.length) return '';
-    var defs = [['換水', 'water', '💧'], ['給餌', 'feeding', '🐟'], ['水質測定', 'wq', '🧪'], ['フィルター掃除', 'maint', '🔧']];
+    var defs = [['換水', 'water', '#00D5E8'], ['給餌', 'feeding', '#D8F542'], ['水質測定', 'wq', '#35D7FF'], ['フィルター掃除', 'maint', '#8BA6B5']];
     var typeOf = { water: '水換え', feeding: '給餌', wq: '水質測定', maint: 'フィルター掃除' };
     return '<div class="sec-hd" style="display:flex;justify-content:space-between;align-items:center;margin:4px 2px 10px"><b style="font-size:15px">クイック操作</b></div>' +
       '<div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:12px">' +
@@ -370,7 +386,7 @@
         var lastTxt = last === null ? '記録なし' : last === 0 ? '今日' : '前回' + last + '日前';
         var note = quickNote(a[1], last);
         return '<button data-quick="' + a[1] + '" style="background:linear-gradient(180deg,rgba(8,28,38,.98),rgba(3,13,19,.98));border:1px solid var(--border);border-radius:12px;padding:10px 4px;color:var(--text);cursor:pointer;text-align:center;font-family:inherit">' +
-          '<div style="font-size:20px;line-height:1;margin-bottom:7px">' + a[2] + '</div>' +
+          '<div style="color:' + a[2] + ';margin-bottom:7px">' + quickIcon(a[1]) + '</div>' +
           '<div style="font-weight:800;font-size:11px">' + esc(a[0]) + '</div>' +
           '<div style="font-size:10px;color:var(--sub);margin:5px 0 3px">' + esc(lastTxt) + '</div>' +
           '<div style="font-size:11px;font-weight:800;color:' + note.c + ';min-height:14px">' + esc(note.t) + '</div></button>';
@@ -401,8 +417,7 @@
   function viewHome() {
     var me = state.me || {};
     app.innerHTML = offlineBanner() +
-      '<div style="padding:4px 2px 10px"><div class="muted">' + esc(greeting()) + '</div>' +
-      '<h2 style="margin:2px 0 0;font-size:20px">' + esc(me.displayName || 'アクアリスト') + 'さんの水槽</h2></div>' +
+      '<div style="padding:6px 2px 12px"><h2 style="margin:0;font-size:20px;font-weight:900;letter-spacing:-.02em">' + esc(me.displayName || 'アクアリスト') + 'さんの水槽</h2></div>' +
       todoHtml() + quickHtml() + promoHtml();
     bindHome();
   }
