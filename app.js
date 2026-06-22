@@ -7,7 +7,7 @@
   'use strict';
   var CFG = window.AQUARY_CONFIG || {};
   // アプリの版数。コード更新のたびに上げる（sw.js の CACHE と揃える）。画面に表示して反映確認に使う。
-  var APP_VERSION = 'v17';
+  var APP_VERSION = 'v18';
   var app = document.getElementById('app');
   var nav = document.getElementById('nav');
   var whoEl = document.getElementById('who');
@@ -1221,15 +1221,66 @@
   function paintEncGrid(list) {
     var items = Array.isArray(list) ? list : (list && list.items) || [];
     var grid = document.getElementById('enc-grid'); if (!grid) return;
+    var catEmoji = { '魚類': '🐟', 'エビ・貝': '🦐', '水草': '🌿', 'その他': '🐚' };
     grid.innerHTML = '<div class="muted" style="margin:2px 0 8px">' + items.length + '種</div><div class="grid">' + items.map(function (e, i) {
       var u = e.photoUrl || (e.photoUrls && e.photoUrls[0]) || '';
-      return '<div class="enc" data-enc="' + i + '" style="cursor:pointer">' + (u ? '<img src="' + esc(imgUrl(u)) + '" loading="lazy">' : '<div style="aspect-ratio:1/1;display:grid;place-items:center;color:var(--dim)">🐟</div>') +
-        '<div class="b"><div class="nm">' + esc(e.name || '') + '</div><div class="sci">' + esc(e.scientific || '') + '</div>' +
-        '<div class="muted" style="font-size:11px;margin-top:2px">♥ ' + (e.likes || 0) + '</div></div></div>';
+      return '<div class="enc" data-enc="' + i + '" style="cursor:pointer"><div style="position:relative">' +
+        (u ? '<img src="' + esc(imgUrl(u)) + '" loading="lazy">' : '<div style="aspect-ratio:1/1;display:grid;place-items:center;font-size:38px">' + (catEmoji[e.category] || '🐟') + '</div>') +
+        '<div style="position:absolute;top:5px;right:7px;background:rgba(0,0,0,.55);border-radius:10px;padding:2px 6px;font-size:10px;color:#fff;letter-spacing:1px">' + stars(e.difficulty) + '</div>' +
+        ((e.likes || 0) > 0 ? '<div style="position:absolute;bottom:5px;left:7px;color:' + (e.likedByMe ? '#ff6b8a' : '#fff') + ';font-size:11px;text-shadow:0 1px 2px #000">' + (e.likedByMe ? '♥' : '♡') + ' ' + e.likes + '</div>' : '') +
+        '</div>' +
+        '<div class="b"><div class="nm">' + esc(e.name || '') + '</div><div class="sci">' + esc(e.scientific || e.classification || '') + '</div></div></div>';
     }).join('') + '</div>';
     [].forEach.call(grid.querySelectorAll('[data-enc]'), function (c) { c.addEventListener('click', function () { encDetail(items[Number(c.getAttribute('data-enc'))]); }); });
   }
   function stars(n) { n = Math.max(0, Math.min(5, parseInt(n) || 0)); return '★'.repeat(n) + '☆'.repeat(5 - n); }
+  // ---------- 分類（界・門・綱…）GAS UiUtils 準拠 ----------
+  var TAX_RANKS = [
+    ['taxKingdom', '界'], ['taxSubkingdom', '亜界'], ['taxPhylum', '門'], ['taxSubphylum', '亜門'],
+    ['taxClass', '綱'], ['taxSubclass', '亜綱'], ['taxOrder', '目'], ['taxSuborder', '亜目'],
+    ['taxFamily', '科'], ['taxSubfamily', '亜科'], ['taxGenus', '属'], ['taxSubgenus', '亜属'],
+    ['taxSpecies', '種'], ['taxSubspecies', '亜種']
+  ];
+  var TAX_TMPL = {
+    fish: { taxKingdom: '動物', taxPhylum: '脊索動物', taxClass: '条鰭' },
+    betta: { taxKingdom: '動物', taxPhylum: '脊索動物', taxClass: '条鰭', taxOrder: 'スズキ', taxFamily: 'オスフロネムス', taxSubfamily: 'ゴクラクギョ', taxGenus: 'ベタ' },
+    plant: { taxKingdom: '植物', taxPhylum: '被子植物' },
+    shrimp: { taxKingdom: '動物', taxPhylum: '節足動物', taxClass: '軟甲' }
+  };
+  function taxDisplayValue(value, label) { value = String(value || '').trim(); if (!value) return ''; return value.slice(-label.length) === label ? value : value + label; }
+  function buildClassificationFromTax(data) { return TAX_RANKS.map(function (r) { return taxDisplayValue(data[r[0]], r[1]); }).filter(Boolean).join(''); }
+  function taxDisplayRanksOf(e) { var raw = e && e.taxDisplayRanks; if (Array.isArray(raw)) return raw; try { var p = JSON.parse(raw || '[]'); if (Array.isArray(p) && raw) return p; } catch (x) {} return TAX_RANKS.map(function (r) { return r[0]; }); }
+  function classificationByRanks(e, ranks) { var allow = {}; ranks.forEach(function (k) { allow[k] = true; }); return TAX_RANKS.map(function (r) { return allow[r[0]] ? taxDisplayValue(e && e[r[0]], r[1]) : ''; }).filter(Boolean).join(''); }
+  function classificationFull(e) { return buildClassificationFromTax(e || {}) || (e && e.classification ? String(e.classification) : ''); }
+  function taxonomyBlock(e) {
+    e = e || {};
+    var sel = taxDisplayRanksOf(e); var has = {}; sel.forEach(function (k) { has[k] = true; });
+    return '<div style="margin-bottom:10px"><label class="muted" style="font-size:12px">分類階級</label>' +
+      '<div data-noswipe style="display:flex;gap:6px;overflow:auto;margin:4px 0 8px">' +
+      [['fish', '魚類'], ['betta', 'ベタ'], ['plant', '水草'], ['shrimp', 'エビ'], ['clear', 'クリア']].map(function (t) { return '<button type="button" class="btn sec ef-tmpl" data-tmpl="' + t[0] + '" style="padding:5px 10px;font-size:12px;white-space:nowrap">' + t[1] + (t[0] === 'clear' ? '' : 'テンプレ') + '</button>'; }).join('') + '</div>' +
+      '<div data-noswipe style="display:flex;gap:6px;overflow-x:auto;padding-bottom:3px">' +
+      TAX_RANKS.map(function (r) { return '<div style="background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:6px;min-width:72px;flex:0 0 72px"><label style="display:block;color:var(--sub);font-size:11px;margin-bottom:4px;text-align:center">' + r[1] + '</label><input id="ef-' + r[0] + '" value="' + esc(e[r[0]] || '') + '" placeholder="' + r[1] + '" style="width:100%;padding:7px 4px;font-size:12px;text-align:center;background:var(--bg2);border:1px solid var(--border);border-radius:7px;color:var(--text)"></div>'; }).join('') + '</div>' +
+      '<div style="margin-top:8px;background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:9px 10px"><div class="muted" style="font-size:12px;margin-bottom:7px">図鑑詳細で表示する階級</div>' +
+      '<div data-noswipe style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px">' +
+      TAX_RANKS.map(function (r) { return '<label style="flex:0 0 auto;display:flex;gap:5px;align-items:center;color:var(--sub);font-size:11px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:999px;padding:5px 8px;white-space:nowrap"><input type="checkbox" class="ef-tax-display" value="' + r[0] + '"' + (has[r[0]] ? ' checked' : '') + '>' + r[1] + '</label>'; }).join('') + '</div></div></div>';
+  }
+  function bindTaxonomy() {
+    [].forEach.call(document.querySelectorAll('.ef-tmpl'), function (b) {
+      b.addEventListener('click', function () {
+        var type = b.getAttribute('data-tmpl'); var vals = TAX_TMPL[type] || {};
+        TAX_RANKS.forEach(function (r) { var el = document.getElementById('ef-' + r[0]); if (!el) return; if (type === 'clear') el.value = ''; else if (vals[r[0]]) el.value = vals[r[0]]; });
+      });
+    });
+  }
+  function collectTaxonomy() {
+    var data = {}; TAX_RANKS.forEach(function (r) { data[r[0]] = val('ef-' + r[0]); });
+    var classification = buildClassificationFromTax(data);
+    var ranks = []; [].forEach.call(document.querySelectorAll('.ef-tax-display'), function (c) { if (c.checked) ranks.push(c.value); });
+    data.classification = classification;
+    data.taxDisplayRanks = JSON.stringify(ranks);
+    data.classificationCollapsed = classificationByRanks(data, ranks) !== classification;
+    return data;
+  }
   function addEncToTank(e) {
     chooseTank((e.name || '') + ' を追加する水槽を選択', function (t) {
       var isPlant = e.category === '水草';
@@ -1248,7 +1299,7 @@
     if (state.encPhotoIdx >= photos.length) state.encPhotoIdx = 0;
     var cur = photos[state.encPhotoIdx] || '';
     var catEmoji = { '魚類': '🐟', 'エビ・貝': '🦐', '水草': '🌿', 'その他': '🐚' }[e.category] || '🐟';
-    var rows = [['分類', e.classification], ['分布', e.distribution], ['全長', e.maxLength || e.size]];
+    var rows = [['分類', classificationFull(e)], ['分布', e.distribution], ['全長', e.maxLength || e.size]];
     modal('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px"><b style="font-size:17px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(e.name || '') + '</b>' +
       '<div style="display:flex;gap:6px;flex-shrink:0"><button class="btn sec" style="padding:6px 9px;font-size:12px" id="enc-report">通報</button><button class="btn sec" style="padding:6px 9px;font-size:12px" id="enc-edit">編集</button>' +
       (e.canDelete ? '<button class="btn sec" style="padding:6px 9px;font-size:12px;color:var(--red)" id="enc-del">削除</button>' : '') +
@@ -1336,6 +1387,7 @@
     modal('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><b>' + (edit ? '図鑑を編集' : '図鑑を追加') + '</b><button class="btn sec" style="padding:6px 10px" onclick="aqCloseModal()">✕</button></div>' +
       inputRow('ef-name', '名称 *', e.name) + inputRow('ef-sci', '学名', e.scientific) +
       '<div style="margin-bottom:10px"><label class="muted" style="font-size:12px">カテゴリー</label>' + chipRow('ef-cat', ['魚類', 'エビ・貝', '水草', 'その他'], e.category || '魚類') + '</div>' +
+      taxonomyBlock(e) +
       '<div style="margin-bottom:10px"><label class="muted" style="font-size:12px">飼育難易度</label>' + chipRow('ef-diff', diffOpts, diffOpts[Math.max(0, Math.min(4, diffN - 1))]) + '</div>' +
       inputRow('ef-dist', '分布', e.distribution) +
       '<label class="muted" style="font-size:12px">水温 / pH / 全長（最小〜最大）</label>' +
@@ -1345,7 +1397,7 @@
       textareaRow('ef-care', '飼育方法', e.care) + textareaRow('ef-breeding', '繁殖・産卵方法', e.breeding) + textareaRow('ef-desc', 'メモ', e.desc) +
       '<button class="btn full" style="margin-top:6px" id="ef-save">' + (edit ? '保存する' : '追加する') + '</button>' +
       (edit && e.canDelete ? '<button class="btn sec full" id="ef-del" style="margin-top:8px;color:var(--red)">この図鑑を削除</button>' : ''));
-    bindChips('ef-cat'); bindChips('ef-diff');
+    bindChips('ef-cat'); bindChips('ef-diff'); bindTaxonomy();
     var efdel = document.getElementById('ef-del');
     if (efdel) efdel.addEventListener('click', function () {
       if (!confirm('「' + (e.name || '') + '」を削除しますか？')) return;
@@ -1361,6 +1413,7 @@
         temp: formatRange(tMin, tMax, '°C'), ph: formatRange(pMin, pMax, ''), maxLength: formatRange(lMin, lMax, 'cm'), size: formatRange(lMin, lMax, 'cm'),
         care: val('ef-care'), breeding: val('ef-breeding'), desc: val('ef-desc')
       };
+      var tax = collectTaxonomy(); for (var k in tax) { if (Object.prototype.hasOwnProperty.call(tax, k)) p[k] = tax[k]; }
       this.disabled = true; this.textContent = '保存中...';
       var action = edit ? 'updateEncyclopedia' : 'addEncyclopedia';
       if (edit) { p.id = e.id; p.expectedUpdatedAt = e.updatedAt || ''; }
