@@ -7,7 +7,7 @@
   'use strict';
   var CFG = window.AQUARY_CONFIG || {};
   // アプリの版数。コード更新のたびに上げる（sw.js の CACHE と揃える）。画面に表示して反映確認に使う。
-  var APP_VERSION = 'v16';
+  var APP_VERSION = 'v17';
   var app = document.getElementById('app');
   var nav = document.getElementById('nav');
   var whoEl = document.getElementById('who');
@@ -1229,44 +1229,72 @@
     }).join('') + '</div>';
     [].forEach.call(grid.querySelectorAll('[data-enc]'), function (c) { c.addEventListener('click', function () { encDetail(items[Number(c.getAttribute('data-enc'))]); }); });
   }
+  function stars(n) { n = Math.max(0, Math.min(5, parseInt(n) || 0)); return '★'.repeat(n) + '☆'.repeat(5 - n); }
+  function addEncToTank(e) {
+    chooseTank((e.name || '') + ' を追加する水槽を選択', function (t) {
+      var isPlant = e.category === '水草';
+      var payload = isPlant
+        ? { tankId: t.id, name: e.name, scientific: e.scientific }
+        : { tankId: t.id, name: e.name, scientific: e.scientific, category: e.category === 'エビ・貝' ? 'エビ・貝' : '魚類' };
+      api(isPlant ? 'addPlant' : 'addOrganism', payload)
+        .then(function () { toast('「' + (t.name || '水槽') + '」に追加しました'); })
+        .catch(function (er) { toast(er.message, 'err'); });
+    });
+  }
   function encDetail(e) {
     if (!e) return;
+    if (state.encDetailId !== e.id) { state.encPhotoIdx = 0; state.encDetailId = e.id; }
     var photos = (e.photoUrls && e.photoUrls.length ? e.photoUrls : (e.photoUrl ? [e.photoUrl] : []));
-    var rows = [['学名', e.scientific], ['カテゴリー', e.category], ['分類', e.classification], ['分布', e.distribution], ['難易度', e.difficulty ? '★'.repeat(Math.min(5, Number(e.difficulty) || 0)) : ''], ['水温', e.temp || (e.tempMin || e.tempMax ? (e.tempMin || '') + '〜' + (e.tempMax || '') : '')], ['pH', e.ph || (e.phMin || e.phMax ? (e.phMin || '') + '〜' + (e.phMax || '') : '')], ['サイズ', e.size || e.maxLength]];
-    modal('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><b style="font-size:16px">' + esc(e.name || '') + '</b><button class="btn sec" style="padding:6px 10px" onclick="aqCloseModal()">✕</button></div>' +
-      (photos.length ? '<div style="display:flex;gap:8px;overflow:auto;margin-bottom:10px">' + photos.map(function (u, i) {
-        return '<div style="flex-shrink:0;text-align:center"><img src="' + esc(imgUrl(u)) + '" style="height:130px;border-radius:10px;display:block">' +
-          '<div style="display:flex;gap:4px;margin-top:4px;justify-content:center">' +
-          (i > 0 ? '<button class="btn sec" style="padding:3px 6px;font-size:10px" data-pleft="' + i + '">◀</button>' : '') +
-          (i < photos.length - 1 ? '<button class="btn sec" style="padding:3px 6px;font-size:10px" data-pright="' + i + '">▶</button>' : '') +
-          (i > 0 ? '<button class="btn sec" style="padding:3px 7px;font-size:10px" data-pmain="' + i + '">メイン</button>' : '<span class="pill" style="font-size:10px">メイン</span>') +
-          '<button class="btn sec" style="padding:3px 7px;font-size:10px" data-pdel="' + i + '">削除</button></div></div>';
-      }).join('') + '</div>' : '') +
-      rows.filter(function (r) { return r[1]; }).map(function (r) { return '<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--border)"><div class="muted" style="width:74px;flex-shrink:0;font-size:12px">' + r[0] + '</div><div style="flex:1;font-size:13px">' + esc(r[1]) + '</div></div>'; }).join('') +
-      (e.care ? '<div style="margin-top:10px"><div class="muted" style="font-size:12px;margin-bottom:3px">飼育方法</div><div style="font-size:13px;line-height:1.7">' + esc(e.care) + '</div></div>' : '') +
-      (e.breeding ? '<div style="margin-top:10px"><div class="muted" style="font-size:12px;margin-bottom:3px">繁殖・産卵</div><div style="font-size:13px;line-height:1.7">' + esc(e.breeding) + '</div></div>' : '') +
-      (e.desc ? '<div style="margin-top:10px"><div class="muted" style="font-size:12px;margin-bottom:3px">メモ</div><div style="font-size:13px;line-height:1.7">' + esc(e.desc) + '</div></div>' : '') +
-      '<div style="display:flex;gap:8px;margin-top:14px">' +
-      '<button class="btn ' + (e.likedByMe ? '' : 'sec') + '" style="flex:1" id="enc-like">' + (e.likedByMe ? '♥' : '♡') + ' ' + (e.likes || 0) + '</button>' +
-      '<button class="btn sec" id="enc-edit">編集</button>' +
-      '<button class="btn sec" id="enc-photo">＋写真</button>' +
-      '<button class="btn sec" id="enc-report">通報</button></div>');
-    document.getElementById('enc-photo').addEventListener('click', function () { encPhotoAdd(e); });
-    [].forEach.call(document.querySelectorAll('[data-pmain]'), function (b) { b.addEventListener('click', function () { encPhotoOp('setEncyclopediaMainPhoto', e, Number(b.getAttribute('data-pmain'))); }); });
-    [].forEach.call(document.querySelectorAll('[data-pdel]'), function (b) { b.addEventListener('click', function () { if (!confirm('この写真を削除しますか？')) return; encPhotoOp('deleteEncyclopediaPhoto', e, Number(b.getAttribute('data-pdel'))); }); });
-    [].forEach.call(document.querySelectorAll('[data-pleft]'), function (b) { b.addEventListener('click', function () { encReorder(e, Number(b.getAttribute('data-pleft')), -1); }); });
-    [].forEach.call(document.querySelectorAll('[data-pright]'), function (b) { b.addEventListener('click', function () { encReorder(e, Number(b.getAttribute('data-pright')), 1); }); });
+    if (state.encPhotoIdx >= photos.length) state.encPhotoIdx = 0;
+    var cur = photos[state.encPhotoIdx] || '';
+    var catEmoji = { '魚類': '🐟', 'エビ・貝': '🦐', '水草': '🌿', 'その他': '🐚' }[e.category] || '🐟';
+    var rows = [['分類', e.classification], ['分布', e.distribution], ['全長', e.maxLength || e.size]];
+    modal('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px"><b style="font-size:17px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(e.name || '') + '</b>' +
+      '<div style="display:flex;gap:6px;flex-shrink:0"><button class="btn sec" style="padding:6px 9px;font-size:12px" id="enc-report">通報</button><button class="btn sec" style="padding:6px 9px;font-size:12px" id="enc-edit">編集</button>' +
+      (e.canDelete ? '<button class="btn sec" style="padding:6px 9px;font-size:12px;color:var(--red)" id="enc-del">削除</button>' : '') +
+      '<button class="btn sec" style="padding:6px 9px" onclick="aqCloseModal()">✕</button></div></div>' +
+      '<div style="position:relative;margin-bottom:8px;border-radius:12px;overflow:hidden">' +
+      (cur ? '<img src="' + esc(imgUrl(cur)) + '" style="width:100%;max-height:280px;object-fit:contain;background:#0A2D3F;display:block">' : '<div style="height:180px;display:grid;place-items:center;background:linear-gradient(135deg,#061825,#0A2D3F);font-size:64px">' + catEmoji + '</div>') +
+      (photos.length > 1 ? '<button id="enc-pprev" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:50%;width:32px;height:32px;cursor:pointer;font-size:18px">‹</button><button id="enc-pnext" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:50%;width:32px;height:32px;cursor:pointer;font-size:18px">›</button><div style="position:absolute;bottom:8px;left:10px;background:rgba(0,0,0,.6);color:#fff;border-radius:8px;padding:2px 8px;font-size:11px">' + (state.encPhotoIdx + 1) + ' / ' + photos.length + '</div>' : '') +
+      '<button id="enc-addphoto" style="position:absolute;bottom:8px;right:10px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:8px;padding:5px 9px;font-size:11px;font-weight:700;cursor:pointer">📷 画像を追加</button>' +
+      '</div>' +
+      (photos.length ? '<div style="display:flex;gap:6px;justify-content:center;margin-bottom:10px;flex-wrap:wrap">' +
+        (state.encPhotoIdx > 0 ? '<button class="btn sec" style="padding:4px 9px;font-size:11px" id="enc-pmain">メインにする</button>' : '') +
+        (state.encPhotoIdx > 0 ? '<button class="btn sec" style="padding:4px 8px;font-size:11px" id="enc-pl">◀</button>' : '') +
+        (state.encPhotoIdx < photos.length - 1 ? '<button class="btn sec" style="padding:4px 8px;font-size:11px" id="enc-pr">▶</button>' : '') +
+        '<button class="btn sec" style="padding:4px 9px;font-size:11px;color:var(--red)" id="enc-pdel">この画像を削除</button></div>' : '') +
+      (e.scientific ? '<div style="color:var(--sub);font-size:13px;font-style:italic;margin-bottom:10px">' + esc(e.scientific) + '</div>' : '') +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><span class="pill" style="color:var(--teal)">カテゴリー: ' + esc(e.category || '') + '</span><span class="pill" style="color:var(--green);background:rgba(61,219,124,.1)">難易度: ' + stars(e.difficulty) + '</span></div>' +
+      '<button class="btn full" id="enc-addtank" style="margin-bottom:12px">自分の水槽に追加</button>' +
+      '<div class="card">' + rows.filter(function (r) { return r[1]; }).map(function (r) { return '<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--border)"><div style="width:58px;color:var(--sub);font-size:12px;flex-shrink:0">' + r[0] + '</div><div style="flex:1;font-size:13px;min-width:0">' + esc(r[1]) + '</div></div>'; }).join('') +
+      (e.care ? '<div style="margin-top:10px"><div class="muted" style="font-size:12px;margin-bottom:4px">飼育方法</div><div style="font-size:14px;line-height:1.75">' + esc(e.care) + '</div></div>' : '') +
+      (e.breeding ? '<div style="margin-top:10px"><div class="muted" style="font-size:12px;margin-bottom:4px">繁殖・産卵方法</div><div style="font-size:14px;line-height:1.75">' + esc(e.breeding) + '</div></div>' : '') +
+      (e.desc ? '<div style="margin-top:10px"><div class="muted" style="font-size:12px;margin-bottom:4px">メモ</div><div style="font-size:14px;line-height:1.75">' + esc(e.desc) + '</div></div>' : '') +
+      '</div>' +
+      ((e.temp || e.ph) ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">' + [['水温', e.temp], ['pH', e.ph]].filter(function (r) { return r[1]; }).map(function (r) { return '<div class="card" style="padding:12px 8px;text-align:center"><div class="muted" style="font-size:11px;margin-bottom:4px">' + r[0] + '</div><div style="font-weight:700;font-size:14px">' + esc(r[1]) + '</div></div>'; }).join('') + '</div>' : '') +
+      '<button class="btn ' + (e.likedByMe ? '' : 'sec') + ' full" id="enc-like" style="margin-bottom:10px">' + (e.likedByMe ? '♥' : '♡') + ' ' + (e.likes || 0) + ' いいね</button>' +
+      (e.updatedByName ? '<div class="muted" style="text-align:center;font-size:12px">最終更新: ' + esc(e.updatedByName) + ' ' + (e.updatedAt ? esc(fmtDate(e.updatedAt)) : '') + '</div>' : '') +
+      (e.addedByName ? '<div class="muted" style="text-align:center;font-size:12px;margin-top:2px">追加: ' + esc(e.addedByName) + '</div>' : ''));
+    document.getElementById('enc-report').addEventListener('click', function () { encReport(e); });
+    document.getElementById('enc-edit').addEventListener('click', function () { encForm(e); });
+    var ed = document.getElementById('enc-del'); if (ed) ed.addEventListener('click', function () { if (!confirm('「' + (e.name || '') + '」を削除しますか？')) return; api('deleteEncyclopedia', { id: e.id }).then(function () { closeModal(); toast('削除しました'); loadEnc(); }).catch(function (er) { toast(er.message, 'err'); }); });
+    document.getElementById('enc-addphoto').addEventListener('click', function () { encPhotoAdd(e); });
+    document.getElementById('enc-addtank').addEventListener('click', function () { addEncToTank(e); });
+    var pp = document.getElementById('enc-pprev'); if (pp) pp.addEventListener('click', function () { state.encPhotoIdx = (state.encPhotoIdx - 1 + photos.length) % photos.length; encDetail(e); });
+    var pn = document.getElementById('enc-pnext'); if (pn) pn.addEventListener('click', function () { state.encPhotoIdx = (state.encPhotoIdx + 1) % photos.length; encDetail(e); });
+    var pm = document.getElementById('enc-pmain'); if (pm) pm.addEventListener('click', function () { encPhotoOp('setEncyclopediaMainPhoto', e, state.encPhotoIdx); });
+    var pdl = document.getElementById('enc-pdel'); if (pdl) pdl.addEventListener('click', function () { if (!confirm('この画像を削除しますか？')) return; encPhotoOp('deleteEncyclopediaPhoto', e, state.encPhotoIdx); });
+    var pl = document.getElementById('enc-pl'); if (pl) pl.addEventListener('click', function () { encReorder(e, state.encPhotoIdx, -1); });
+    var pr = document.getElementById('enc-pr'); if (pr) pr.addEventListener('click', function () { encReorder(e, state.encPhotoIdx, 1); });
     document.getElementById('enc-like').addEventListener('click', function () {
       var b = this; b.disabled = true;
       api('likeEncyclopedia', { id: e.id }).then(function (r) {
         e.likedByMe = r && r.likedByMe !== undefined ? r.likedByMe : !e.likedByMe;
         e.likes = r && r.likes !== undefined ? r.likes : (Number(e.likes || 0) + (e.likedByMe ? 1 : -1));
-        b.className = 'btn ' + (e.likedByMe ? '' : 'sec'); b.innerHTML = (e.likedByMe ? '♥' : '♡') + ' ' + e.likes; b.disabled = false;
+        b.className = 'btn ' + (e.likedByMe ? '' : 'sec') + ' full'; b.innerHTML = (e.likedByMe ? '♥' : '♡') + ' ' + e.likes + ' いいね'; b.disabled = false;
         paintEncGrid(state.enc);
       }).catch(function (er) { b.disabled = false; toast(er.message, 'err'); });
     });
-    document.getElementById('enc-edit').addEventListener('click', function () { encForm(e); });
-    document.getElementById('enc-report').addEventListener('click', function () { encReport(e); });
   }
   function encReport(e) {
     modal('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><b>図鑑を通報</b><button class="btn sec" style="padding:6px 10px" onclick="aqCloseModal()">✕</button></div>' +
@@ -1278,24 +1306,61 @@
       api('reportEncyclopedia', { entryId: e.id, reason: reason }).then(function () { closeModal(); toast('通報を送信しました'); }).catch(function (er) { toast(er.message, 'err'); var b = document.getElementById('rep-save'); if (b) { b.disabled = false; b.textContent = '通報する'; } });
     });
   }
+  function chipRow(id, opts, current) {
+    return '<div id="' + id + '" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">' + opts.map(function (o) {
+      var on = String(o) === String(current);
+      return '<button type="button" data-v="' + esc(o) + '" class="aq-chip' + (on ? ' on' : '') + '" style="border-radius:20px;padding:6px 12px;font-size:13px;cursor:pointer;font-family:inherit;border:1px solid ' + (on ? 'var(--teal)' : 'var(--border)') + ';background:' + (on ? 'var(--teal)' : 'var(--card2)') + ';color:' + (on ? '#001014' : 'var(--sub)') + ';font-weight:' + (on ? '700' : '400') + '">' + esc(o) + '</button>';
+    }).join('') + '</div>';
+  }
+  function bindChips(id) {
+    var c = document.getElementById(id); if (!c) return;
+    [].forEach.call(c.querySelectorAll('.aq-chip'), function (b) {
+      b.addEventListener('click', function () {
+        [].forEach.call(c.querySelectorAll('.aq-chip'), function (x) { x.classList.remove('on'); x.style.border = '1px solid var(--border)'; x.style.background = 'var(--card2)'; x.style.color = 'var(--sub)'; x.style.fontWeight = '400'; });
+        b.classList.add('on'); b.style.border = '1px solid var(--teal)'; b.style.background = 'var(--teal)'; b.style.color = '#001014'; b.style.fontWeight = '700';
+      });
+    });
+  }
+  function activeChip(id) { var c = document.getElementById(id); if (!c) return ''; var on = c.querySelector('.aq-chip.on'); return on ? on.getAttribute('data-v') : ''; }
+  function formatRange(mn, mx, unit) { mn = String(mn || '').trim(); mx = String(mx || '').trim(); if (mn && mx) return mn + '〜' + mx + unit; if (mn) return mn + unit; if (mx) return mx + unit; return ''; }
+  function rangeMini(key, label, mn, mx, unit) {
+    return '<div><div class="muted" style="font-size:11px;margin-bottom:3px">' + label + (unit ? '(' + unit + ')' : '') + '</div><div style="display:flex;align-items:center;gap:2px">' +
+      '<input id="ef-' + key + 'Min" type="number" step="any" value="' + esc(mn == null ? '' : mn) + '" style="width:100%;padding:7px 3px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;text-align:center">' +
+      '<span style="color:var(--dim);font-size:11px">〜</span>' +
+      '<input id="ef-' + key + 'Max" type="number" step="any" value="' + esc(mx == null ? '' : mx) + '" style="width:100%;padding:7px 3px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;text-align:center"></div></div>';
+  }
   function encForm(e) {
     var edit = !!e; e = e || {};
+    var diffN = parseInt(e.difficulty) || 3;
+    var diffOpts = ['1★', '2★★', '3★★★', '4★★★★', '5★★★★★'];
     modal('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><b>' + (edit ? '図鑑を編集' : '図鑑を追加') + '</b><button class="btn sec" style="padding:6px 10px" onclick="aqCloseModal()">✕</button></div>' +
-      inputRow('ef-name', '名前 *', e.name) + inputRow('ef-sci', '学名', e.scientific) +
-      '<div style="margin-bottom:8px"><label class="muted" style="font-size:12px">カテゴリー</label><select id="ef-cat" style="width:100%;margin-top:3px;padding:9px;background:var(--card2);border:1px solid var(--border);border-radius:9px;color:var(--text)">' + ['魚類', 'エビ・貝', '水草', 'その他'].map(function (c) { return '<option' + (e.category === c ? ' selected' : '') + '>' + c + '</option>'; }).join('') + '</select></div>' +
-      inputRow('ef-diff', '難易度(1-5)', e.difficulty, 'number') + inputRow('ef-dist', '分布', e.distribution) +
-      inputRow('ef-temp', '水温', e.temp) + inputRow('ef-ph', 'pH', e.ph) + inputRow('ef-size', 'サイズ', e.size || e.maxLength) +
-      textareaRow('ef-care', '飼育方法', e.care) + textareaRow('ef-breeding', '繁殖・産卵', e.breeding) + textareaRow('ef-desc', 'メモ', e.desc) +
+      inputRow('ef-name', '名称 *', e.name) + inputRow('ef-sci', '学名', e.scientific) +
+      '<div style="margin-bottom:10px"><label class="muted" style="font-size:12px">カテゴリー</label>' + chipRow('ef-cat', ['魚類', 'エビ・貝', '水草', 'その他'], e.category || '魚類') + '</div>' +
+      '<div style="margin-bottom:10px"><label class="muted" style="font-size:12px">飼育難易度</label>' + chipRow('ef-diff', diffOpts, diffOpts[Math.max(0, Math.min(4, diffN - 1))]) + '</div>' +
+      inputRow('ef-dist', '分布', e.distribution) +
+      '<label class="muted" style="font-size:12px">水温 / pH / 全長（最小〜最大）</label>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:4px 0 12px">' +
+      rangeMini('temp', '水温', e.tempMin, e.tempMax, '°C') + rangeMini('ph', 'pH', e.phMin, e.phMax, '') + rangeMini('length', '全長', e.lengthMin, e.lengthMax, 'cm') +
+      '</div>' +
+      textareaRow('ef-care', '飼育方法', e.care) + textareaRow('ef-breeding', '繁殖・産卵方法', e.breeding) + textareaRow('ef-desc', 'メモ', e.desc) +
       '<button class="btn full" style="margin-top:6px" id="ef-save">' + (edit ? '保存する' : '追加する') + '</button>' +
-      (edit ? '<button class="btn sec full" id="ef-del" style="margin-top:8px;color:var(--red)">この図鑑を削除</button>' : ''));
+      (edit && e.canDelete ? '<button class="btn sec full" id="ef-del" style="margin-top:8px;color:var(--red)">この図鑑を削除</button>' : ''));
+    bindChips('ef-cat'); bindChips('ef-diff');
     var efdel = document.getElementById('ef-del');
     if (efdel) efdel.addEventListener('click', function () {
-      if (!confirm('「' + (e.name || '') + '」を削除しますか？（登録者または管理者のみ）')) return;
+      if (!confirm('「' + (e.name || '') + '」を削除しますか？')) return;
       api('deleteEncyclopedia', { id: e.id }).then(function () { closeModal(); toast('削除しました'); loadEnc(); }).catch(function (er) { toast(er.message, 'err'); });
     });
     document.getElementById('ef-save').addEventListener('click', function () {
-      var name = val('ef-name'); if (!name) { toast('名前を入力してください', 'err'); return; }
-      var p = { name: name, scientific: val('ef-sci'), category: val('ef-cat'), difficulty: val('ef-diff'), distribution: val('ef-dist'), temp: val('ef-temp'), ph: val('ef-ph'), size: val('ef-size'), care: val('ef-care'), breeding: val('ef-breeding'), desc: val('ef-desc') };
+      var name = val('ef-name'); if (!name) { toast('名称を入力してください', 'err'); return; }
+      var diffRaw = activeChip('ef-diff') || '3'; var diff = (diffRaw.match(/\d/) || ['3'])[0];
+      var tMin = val('ef-tempMin'), tMax = val('ef-tempMax'), pMin = val('ef-phMin'), pMax = val('ef-phMax'), lMin = val('ef-lengthMin'), lMax = val('ef-lengthMax');
+      var p = {
+        name: name, scientific: val('ef-sci'), category: activeChip('ef-cat') || '魚類', difficulty: diff, distribution: val('ef-dist'),
+        tempMin: tMin, tempMax: tMax, phMin: pMin, phMax: pMax, lengthMin: lMin, lengthMax: lMax,
+        temp: formatRange(tMin, tMax, '°C'), ph: formatRange(pMin, pMax, ''), maxLength: formatRange(lMin, lMax, 'cm'), size: formatRange(lMin, lMax, 'cm'),
+        care: val('ef-care'), breeding: val('ef-breeding'), desc: val('ef-desc')
+      };
       this.disabled = true; this.textContent = '保存中...';
       var action = edit ? 'updateEncyclopedia' : 'addEncyclopedia';
       if (edit) { p.id = e.id; p.expectedUpdatedAt = e.updatedAt || ''; }
