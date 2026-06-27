@@ -3,7 +3,7 @@
  * API（GAS doPost）はクロスオリジンPOSTのためキャッシュしない（=常にネットワーク）。
  * 読み取りデータのオフライン表示は app.js 側の localStorage キャッシュで担う。
  */
-var CACHE = 'aquary-shell-v18';
+var CACHE = 'aquary-shell-v19';
 var SHELL = [
   './',
   './index.html',

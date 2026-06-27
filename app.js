@@ -7,7 +7,7 @@
   'use strict';
   var CFG = window.AQUARY_CONFIG || {};
   // アプリの版数。コード更新のたびに上げる（sw.js の CACHE と揃える）。画面に表示して反映確認に使う。
-  var APP_VERSION = 'v18';
+  var APP_VERSION = 'v19';
   var app = document.getElementById('app');
   var nav = document.getElementById('nav');
   var whoEl = document.getElementById('who');
@@ -65,6 +65,38 @@
     if (val === undefined || val === '' || val === null) return 'var(--dim)';
     var v = Number(val); if (isNaN(v)) return 'var(--dim)';
     var r = targetRange(t, key); return (v < r[0] || v > r[1]) ? 'var(--yellow,#ffcf5a)' : 'var(--good)';
+  }
+
+  // ---------- [PERF] 計測ヘルパー（確定後に削除） ----------
+  function perfStart_(tag) {
+    var t0 = (window.performance && performance.now) ? performance.now() : Date.now();
+    var marks = {}; var srv = null;
+    // HTML受信+パース完了→ナビ開始からの時間（Navigation Timing）
+    var navMs = null, ttfb = null;
+    try {
+      var nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
+      if (nav) { navMs = Math.round(nav.domContentLoadedEventEnd || nav.domInteractive || 0); ttfb = Math.round(nav.responseStart || 0); }
+    } catch (e) {}
+    return {
+      mark: function (name) { marks[name] = ((window.performance && performance.now) ? performance.now() : Date.now()) - t0; },
+      server: function (b) { srv = { bootstrap: b && b._timing, api: b && b._apiTiming }; },
+      report: function () {
+        var rows = {
+          'TTFB(ms)': ttfb,
+          'HTML受信+パース完了(ms)': navMs,
+          'boot開始→キャッシュ描画(ms)': marks.cacheRender != null ? Math.round(marks.cacheRender) : '(キャッシュ無)',
+          'bootstrap往復(ms)': (marks.reqStart != null && marks.reqEnd != null) ? Math.round(marks.reqEnd - marks.reqStart) : null,
+          '└ サーバー処理(ms)': srv && srv.api ? srv.api.total : (srv && srv.bootstrap ? srv.bootstrap.total : null),
+          '└ ネットワーク(ms)': (srv && (srv.api || srv.bootstrap) && marks.reqStart != null && marks.reqEnd != null)
+            ? Math.round((marks.reqEnd - marks.reqStart) - ((srv.api && srv.api.total) || (srv.bootstrap && srv.bootstrap.total) || 0)) : null,
+          '最新データ描画完了(ms)': marks.rendered != null ? Math.round(marks.rendered) : null,
+        };
+        console.log('%c[PERF ' + tag + '] 初期表示の区間計測', 'font-weight:bold;color:#00C9E4');
+        try { console.table(rows); } catch (e) { console.log(rows); }
+        if (srv && srv.bootstrap) console.log('[PERF ' + tag + '] サーバー bootstrap 内訳(ms):', srv.bootstrap);
+        if (srv && srv.api) console.log('[PERF ' + tag + '] サーバー API層 内訳(ms):', srv.api);
+      },
+    };
   }
 
   // ---------- API ----------
@@ -219,6 +251,7 @@
 
   // ---------- データ取得 ----------
   function boot() {
+    var __perf = perfStart_('PWA'); // [PERF] 計測（確定後に削除）
     if (!tokenValid()) { renderLogin(); return; }
     nav.style.display = 'flex';
     var menuBtn = document.getElementById('menu-btn'); if (menuBtn) menuBtn.style.display = 'flex';
@@ -230,8 +263,12 @@
       paintWho(); renderDrawer();
       if (!(state.me.needsTermsConsent && !state.me.isAdmin)) { setTab(state.tab || 'home'); showedCache = true; }
     } else { app.innerHTML = loadingHtml(); }
+    if (showedCache) __perf.mark('cacheRender'); // [PERF] キャッシュで初期描画できた時刻
     updateQueueBanner();
+    __perf.mark('reqStart'); // [PERF] bootstrap送信直前
     api('bootstrap').then(function (b) {
+      __perf.mark('reqEnd'); // [PERF] bootstrap応答受信
+      __perf.server(b); // [PERF] サーバー区間ms(_timing/_apiTiming)を取り込む
       b = b || {};
       state.me = b.me || state.me; lsSet('me', state.me);
       state.tanks = b.tanks || []; lsSet('tanks', state.tanks);
@@ -243,6 +280,7 @@
       // 既に表示中のタブが home なら最新データで再描画。別タブを開いていれば触らない。
       if (!showedCache) setTab(state.tab || 'home');
       else if (state.tab === 'home') viewHome();
+      __perf.mark('rendered'); __perf.report(); // [PERF] 最新データ描画完了→レポート出力
       api('getRecords', {}).then(function (r) { state.records = r || []; if (state.tab === 'home') viewHome(); }).catch(function () {});
       refreshActivityBadge();
       flushQueue();
